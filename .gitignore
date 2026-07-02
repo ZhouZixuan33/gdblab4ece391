@@ -1,0 +1,8 @@
+build/
+*.o
+*.out
+*.core
+core
+core.*
+qemu.log
+.gdb_history

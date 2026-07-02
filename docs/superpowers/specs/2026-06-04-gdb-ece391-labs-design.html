@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GDB ECE391 Labs Design</title>
+  <style>
+    :root { color-scheme: light; --text:#172033; --muted:#5b6475; --border:#d8dee8; --code:#f5f7fb; --accent:#116a6c; }
+    body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; color:var(--text); background:#fbfcfe; }
+    main { max-width: 920px; margin: 0 auto; padding: 48px 28px 80px; line-height: 1.65; }
+    h1 { font-size: 2.2rem; line-height: 1.15; margin: 0 0 1rem; color:#101828; }
+    h2 { margin-top: 2.4rem; padding-top: 1.2rem; border-top: 1px solid var(--border); font-size: 1.45rem; }
+    h3 { margin-top: 1.8rem; font-size: 1.14rem; color:var(--accent); }
+    p { margin: .7rem 0; }
+    ul { margin: .6rem 0 1rem 1.3rem; padding:0; }
+    li { margin: .35rem 0; }
+    code { font-family: "Cascadia Code", Consolas, monospace; background: var(--code); border: 1px solid var(--border); border-radius: 4px; padding: .08rem .28rem; font-size: .92em; }
+    pre { background:#111827; color:#e5e7eb; border-radius: 8px; padding: 1rem; overflow:auto; line-height:1.45; box-shadow: 0 10px 24px rgba(15,23,42,.08); }
+    pre code { background:transparent; border:0; padding:0; color:inherit; }
+    .note { color:var(--muted); font-size:.95rem; margin-bottom:2rem; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="note">Readable HTML view generated from the Markdown design spec.</div>
+  <h1>GDB ECE391 Labs Design</h1>
+
+<p>Date: 2026-06-04</p>
+
+<h2>Purpose</h2>
+
+<p>This project will create a 3-4 week, project-oriented debugging training repo for preparing for UIUC ECE391. The learner already knows enough C to write small programs, but is not yet comfortable using GDB, Makefile-driven builds, 32-bit x86 concepts, assembly-level debugging, QEMU, or GDB remote debugging.</p>
+
+<p>The project should teach debugging as a repeatable workflow. Each lab will start from a concrete failure scenario, then guide the learner through the commands, terminology, mental models, and ECE391 relevance needed to diagnose it.</p>
+
+<h2>Target Environment</h2>
+
+<ul>
+<li>Primary environment: AWS Ubuntu VM.</li>
+<li>OS: Ubuntu 24.04.4 LTS, x86_64.</li>
+<li>Workflow: SSH terminal, Makefiles, GCC, GDB, binutils, QEMU.</li>
+<li>Later labs may use 32-bit x86 compilation and <code>qemu-system-i386</code>.</li>
+</ul>
+
+<p>This environment is close enough to ECE391-style Linux command-line work while remaining easy to reset and extend.</p>
+
+<h2>Learning Principles</h2>
+
+<p>The project will follow these principles:</p>
+
+<ul>
+<li>Teach through failure scenarios, not isolated command memorization.</li>
+<li>Explain why every lab matters for ECE391.</li>
+<li>Give beginners a clear starting path so they do not freeze at a crash prompt.</li>
+<li>Gradually remove support through three practice modes.</li>
+<li>Explain GDB terminology in Chinese and English.</li>
+<li>Use diagrams for spatial concepts such as stack frames, call stacks, build dependencies, memory layout, and QEMU-GDB remote connections.</li>
+</ul>
+
+<h2>Practice Modes</h2>
+
+<p>Each lab will provide three levels.</p>
+
+<h3>Guided Mode</h3>
+
+<p>Guided Mode is a narrated debugging walkthrough. It gives exact commands and explains each step.</p>
+
+<p>Each step must include:</p>
+
+<ul>
+<li><code>Command</code>: the exact shell, Make, GDB, or QEMU command.</li>
+<li><code>Plain-English Meaning / 白话解释</code>: what the command means in simple language.</li>
+<li><code>When to Use It / 什么时候用</code>: the debugging situation where this command should come to mind.</li>
+<li><code>What to Look For / 看输出里的什么</code>: the important part of the output.</li>
+<li><code>Memory Hook / 记忆钩子</code>: a short cue that helps the learner remember the command.</li>
+<li><code>ECE391 Connection / 和 ECE391 的联系</code>: how this command or concept appears in systems debugging.</li>
+</ul>
+
+<p>Example format:</p>
+
+<pre><code class="language-text">Step: Inspect the current function arguments / 查看当前函数参数
+
+Command:
+(gdb) info args
+
+Plain-English Meaning / 白话解释:
+Show the values passed into the current function.
+
+When to Use It / 什么时候用:
+Use this after `bt` and `frame` when a function crashes and you need to know whether the caller passed bad data.
+
+What to Look For / 看输出里的什么:
+Look for NULL pointers, impossible sizes, strange addresses, or values that contradict your expectations.
+
+Memory Hook / 记忆钩子:
+args = arguments = this function&#x27;s incoming baggage.
+
+ECE391 Connection / 和 ECE391 的联系:
+System calls, interrupt handlers, file system functions, and memory routines often fail because bad pointers or sizes were passed down the call chain.</code></pre>
+
+<h3>Hint Mode</h3>
+
+<p>Hint Mode gives the debugging direction but not the exact command list. It helps the learner recall commands from memory.</p>
+
+<p>Example:</p>
+
+<pre><code class="language-text">1. Stop at `main`.
+2. Run until the crash.
+3. Inspect the call stack.
+4. Move to the caller frame.
+5. Inspect the arguments passed into the crashing function.</code></pre>
+
+<h3>Challenge Mode</h3>
+
+<p>Challenge Mode gives only the failure symptom. It simulates real debugging.</p>
+
+<p>Example:</p>
+
+<pre><code class="language-text">The program sometimes segfaults when copying a string. Find the first function that receives a bad pointer and explain where the bad value came from.</code></pre>
+
+<h2>First-Response Debugging Recipes</h2>
+
+<p>First-response recipes should live in <code>docs/command-cheatsheet.md</code>, organized by symptom. Do not generate a standard &quot;First 60 Seconds&quot; section in every lab.</p>
+
+<p>Reason: for these beginner labs, a short command-only section often duplicates Guided Mode without enough explanation. The lab document should move from concept warmup into Guided Mode, while the cheatsheet provides quick command lookup once the learner has already practiced the workflow.</p>
+
+<p>A lab may include a short quick-path section only when it adds real value beyond Guided Mode, such as a review lab, a multi-scenario lab where the learner needs to choose one path, or a troubleshooting note for environment-specific setup. Otherwise, skip it.</p>
+
+<p>For a crash:</p>
+
+<pre><code class="language-gdb">run
+bt
+frame 0
+info locals
+info args
+list</code></pre>
+
+<p>For a hang:</p>
+
+<pre><code class="language-text">Run the program, interrupt it with Ctrl-C, then inspect:</code></pre>
+
+<pre><code class="language-gdb">bt
+info registers
+x/i $pc</code></pre>
+
+<p>For QEMU remote debugging:</p>
+
+<pre><code class="language-gdb">target remote :1234
+info registers
+x/10i $eip
+bt</code></pre>
+
+<h2>Terminology System</h2>
+
+<p>New terminology will be explained in Chinese and English. Each lab will include a <code>Terminology Capsule</code> when it introduces terms.</p>
+
+<p>Required format:</p>
+
+<pre><code class="language-text">Term: stack frame / 栈帧
+
+Meaning / 是什么:
+One function call&#x27;s execution record, including arguments, local variables, saved registers, and the return address.
+
+How it appears in GDB / 在 GDB 里怎么看:
+bt
+frame 1
+info locals
+info args
+
+Debugging use / 调试时怎么用:
+Use stack frames to understand which function is currently running, who called it, and where bad arguments or corrupted return paths came from.
+
+ECE391 connection / 和 ECE391 的联系:
+Kernel panics, exceptions, interrupts, and system calls often require reasoning about call paths, saved return addresses, and corrupted stack data.</code></pre>
+
+<p>Terminology explanations should stay lightweight. Simple terms may use only two or three concise lines. Complex spatial or workflow concepts may include an optional <code>Visual model / 图示</code> section using ASCII, Mermaid, or the visual companion.</p>
+
+<p>Core terms to cover include:</p>
+
+<ul>
+<li><code>breakpoint / 断点</code></li>
+<li><code>watchpoint / 观察点</code></li>
+<li><code>stack / 栈</code></li>
+<li><code>stack frame / 栈帧</code></li>
+<li><code>backtrace / 调用栈回溯</code></li>
+<li><code>register / 寄存器</code></li>
+<li><code>instruction pointer / 指令指针</code></li>
+<li><code>address / 地址</code></li>
+<li><code>symbol / 符号</code></li>
+<li><code>object file / 目标文件</code></li>
+<li><code>linker / 链接器</code></li>
+<li><code>calling convention / 调用约定</code></li>
+<li><code>core dump / core 转储</code></li>
+<li><code>remote target / 远程调试目标</code></li>
+<li><code>CPU exception / CPU 异常</code></li>
+<li><code>page fault / 缺页异常</code></li>
+<li><code>general protection fault / 通用保护异常</code></li>
+<li><code>double fault / 双重故障</code></li>
+<li><code>triple fault / 三重故障</code></li>
+</ul>
+
+<p>The Week 4 terminology should explain these exception terms as ECE391-relevant debugging concepts:</p>
+
+<ul>
+<li><code>page fault / 缺页异常</code>: address translation or page permission failed.</li>
+<li><code>general protection fault / 通用保护异常</code>: an x86 protection rule was violated, often involving privilege, segment, descriptor, or control-structure mistakes.</li>
+<li><code>double fault / 双重故障</code>: the CPU hit another exception while trying to handle an earlier exception.</li>
+<li><code>triple fault / 三重故障</code>: exception handling failed so badly that the CPU resets; in QEMU this may look like an instant reboot, black screen, or jump back to startup code.</li>
+</ul>
+
+<p>These terms should be introduced carefully. The labs should teach how to inspect the failure site first, not require the learner to implement a full exception subsystem before understanding the debugging workflow.</p>
+
+<h2>Visual Companion and Diagrams</h2>
+
+<p>The project should use diagrams when a concept is easier to understand spatially than verbally.</p>
+
+<p>Persistent documentation should use ASCII diagrams or Mermaid diagrams so it works inside Markdown and terminal workflows.</p>
+
+<p>The visual companion can be used during explanation or review for concepts where an interactive or clearer visual helps. Good candidates:</p>
+
+<ul>
+<li>Stack frame layout.</li>
+<li>Backtrace as a call-chain map.</li>
+<li>Makefile dependency graph.</li>
+<li>C-to-object-to-link build pipeline.</li>
+<li>QEMU and GDB remote-debug connection.</li>
+<li>Instruction pointer moving through assembly.</li>
+<li>Memory layout for stack, heap, globals, and code.</li>
+</ul>
+
+<p>The visual companion is optional per concept. It should be used when it clarifies the idea, not as a required part of every lab.</p>
+
+<p>Example ASCII diagram for stack frames:</p>
+
+<pre><code class="language-text">High Address
++----------------------+
+| caller stack frame   |  &lt;- main()
+| return address       |
+| saved ebp/rbp        |
++----------------------+
+| current stack frame  |  &lt;- buggy_func()
+| local variables      |
+| function arguments   |
+| saved registers      |
++----------------------+
+Low Address</code></pre>
+
+<p>Example backtrace model:</p>
+
+<pre><code class="language-text">main()
+  calls parse_input()
+    calls copy_name()
+      crashes here
+
+GDB backtrace:
+
+#0 copy_name()
+#1 parse_input()
+#2 main()</code></pre>
+
+<h2>Lab Document Template</h2>
+
+<p>Each lab should use this structure:</p>
+
+<pre><code class="language-text">Goal
+Failure Scenario
+Why This Matters for ECE391
+Concept Warmup
+Terminology Capsule
+Visual Mental Model
+Guided Mode
+Hint Mode
+Challenge Mode
+Expected Findings
+Reflection</code></pre>
+
+<p>Optional: include <code>Quick Path</code> only for review or troubleshooting labs where a compact command path adds value beyond Guided Mode.</p>
+
+<h2>Repository Structure</h2>
+
+<pre><code class="language-text">gdb-ece391-labs/
+  README.md
+  setup/
+    ubuntu-24.04.md
+    packages.md
+  week1-gdb-basics/
+    lab01-breakpoints/
+    lab02-stack-backtrace/
+    lab03-watchpoints/
+  week2-memory-debugging/
+    lab04-array-overflow/
+    lab05-heap-lifetime/
+    lab06-core-dump/
+  week3-build-asm-32bit/
+    lab07-makefile-deps/
+    lab08-linker-symbols/
+    lab09-x86-calling-convention/
+    lab10-c-and-asm/
+  week4-qemu-remote-gdb/
+    lab11-qemu-hello/
+    lab12-remote-breakpoints/
+    lab13-registers-and-exceptions/
+    lab14-mini-kernel-debug/
+  docs/
+    command-cheatsheet.md
+    terminology.md
+    ece391-debugging-map.md</code></pre>
+
+<h2>Four-Week Curriculum</h2>
+
+<h3>Week 1: GDB User-Space Basics</h3>
+
+<p>Goal: Build basic GDB muscle memory in ordinary C programs before adding systems complexity.</p>
+
+<p>Lab 01: Hello GDB, breakpoints, and stepping</p>
+
+<ul>
+<li>Failure scenario: The program produces the wrong output but does not crash.</li>
+<li>Commands: <code>gdb</code>, <code>break</code>, <code>run</code>, <code>next</code>, <code>step</code>, <code>continue</code>, <code>print</code>, <code>display</code>, <code>list</code>.</li>
+<li>ECE391 reason: Many systems bugs begin as state becoming wrong before any crash occurs.</li>
+</ul>
+
+<p>Lab 02: Backtrace and stack frames</p>
+
+<ul>
+<li>Failure scenario: A multi-function program segfaults several calls below the original mistake.</li>
+<li>Commands: <code>bt</code>, <code>frame</code>, <code>up</code>, <code>down</code>, <code>info args</code>, <code>info locals</code>.</li>
+<li>ECE391 reason: Kernel bugs often crash downstream from the real bad caller.</li>
+</ul>
+
+<p>Lab 03: Watchpoints and changing state</p>
+
+<ul>
+<li>Failure scenario: A variable or struct field is unexpectedly changed.</li>
+<li>Commands: <code>watch</code>, <code>rwatch</code>, <code>awatch</code>, <code>condition</code>, <code>ignore</code>, <code>commands</code>.</li>
+<li>ECE391 reason: Process tables, file descriptor tables, paging metadata, and global kernel state can be corrupted far from where symptoms appear.</li>
+</ul>
+
+<h3>Week 2: Memory, Stack, Pointers, and Core Dumps</h3>
+
+<p>Goal: Learn how to inspect memory and reason about pointer and lifetime bugs.</p>
+
+<p>Lab 04: Array overflow</p>
+
+<ul>
+<li>Failure scenario: An out-of-bounds write corrupts adjacent data and may not crash immediately.</li>
+<li>Commands: <code>x/16xw addr</code>, <code>print &amp;var</code>, <code>info registers</code>, <code>bt</code>.</li>
+<li>ECE391 reason: Out-of-bounds writes can corrupt return addresses, function pointers, tables, or adjacent structure fields.</li>
+</ul>
+
+<p>Lab 05: Heap lifetime</p>
+
+<ul>
+<li>Failure scenario: Use-after-free or double free.</li>
+<li>Commands: <code>print ptr</code>, <code>x/32xb ptr</code>, <code>ptype</code>, <code>watch *ptr</code>, plus AddressSanitizer as a comparison tool.</li>
+<li>ECE391 reason: Kernel environments may not provide sanitizers, but object lifetime reasoning still matters.</li>
+</ul>
+
+<p>Lab 06: Core dump analysis</p>
+
+<ul>
+<li>Failure scenario: A program has already crashed and only the executable plus core file remain.</li>
+<li>Commands: <code>ulimit -c unlimited</code>, <code>gdb ./prog core</code>, <code>bt</code>, <code>info locals</code>, <code>x/i $pc</code>.</li>
+<li>ECE391 reason: Systems debugging often begins from a broken state, not a clean tutorial start.</li>
+</ul>
+
+<h3>Week 3: Makefile, 32-bit x86, and Assembly View</h3>
+
+<p>Goal: Bridge from source-level C debugging to build products, symbols, registers, calling conventions, and assembly-level reasoning.</p>
+
+<p>Lab 07: Makefile dependencies</p>
+
+<ul>
+<li>Failure scenario: A header changes but the expected object file is not rebuilt, or a stale build hides the real source.</li>
+<li>Commands: <code>make</code>, <code>make clean</code>, <code>make -n</code>, <code>make VERBOSE=1</code>.</li>
+<li>ECE391 reason: ECE391 projects involve <code>.c</code>, <code>.S</code>, <code>.h</code>, object files, and linked images. If the build chain is wrong, GDB may not be debugging the code the learner thinks it is debugging.</li>
+</ul>
+
+<p>Lab 08: Linker symbols</p>
+
+<ul>
+<li>Failure scenario: Link failures, missing symbols, or mismatched function declarations and definitions.</li>
+<li>Commands: <code>nm</code>, <code>objdump -t</code>, <code>readelf -s</code>, GDB <code>info functions</code>.</li>
+<li>ECE391 reason: QEMU/GDB kernel debugging depends on symbol tables so breakpoints can be set by function name instead of raw address.</li>
+</ul>
+
+<p>Lab 09: x86 calling convention</p>
+
+<ul>
+<li>Failure scenario: Misunderstanding how arguments, return values, saved registers, and stack cleanup work.</li>
+<li>Commands: <code>disassemble</code>, <code>info registers</code>, <code>x/16xw $esp</code>, <code>si</code>, <code>ni</code>.</li>
+<li>ECE391 reason: System calls, interrupt handlers, C/assembly boundaries, and context switching require understanding registers and stack layout.</li>
+</ul>
+
+<p>Lab 10: C and assembly mixed debugging</p>
+
+<ul>
+<li>Failure scenario: An assembly helper fails to preserve a register or returns with the stack in the wrong state.</li>
+<li>Commands: <code>layout asm</code>, <code>break *addr</code>, <code>x/10i $eip</code>, <code>info registers</code>, <code>stepi</code>.</li>
+<li>ECE391 reason: Assembly entry points, interrupt stubs, and context-switch code are easier to debug when the learner can move between C, assembly, and registers.</li>
+</ul>
+
+<h3>Week 4: QEMU and GDB Remote Debugging</h3>
+
+<p>Goal: Practice the core workflow for debugging a target running under QEMU.</p>
+
+<p>Lab 11: QEMU hello target</p>
+
+<ul>
+<li>Failure scenario: A target starts paused in QEMU and waits for GDB.</li>
+<li>Commands: <code>qemu-system-i386 -s -S ...</code>, <code>target remote :1234</code>, <code>continue</code>.</li>
+<li>ECE391 reason: Remote GDB against QEMU is a core systems debugging workflow.</li>
+</ul>
+
+<p>Lab 12: Remote breakpoints</p>
+
+<ul>
+<li>Failure scenario: A target runs in QEMU, and the learner must stop at a function or raw address.</li>
+<li>Commands: <code>symbol-file</code>, <code>break function</code>, <code>break *addr</code>, <code>info breakpoints</code>.</li>
+<li>ECE391 reason: Kernel startup, initialization, and interrupt-related code often require breakpoints before ordinary output exists.</li>
+</ul>
+
+<p>Lab 13: Registers and exceptions</p>
+
+<ul>
+<li>Failure scenario: Controlled CPU-exception-style failures are triggered, such as invalid memory access, invalid instruction or protection-rule violation, and corrupted control flow.</li>
+<li>Commands: <code>info registers</code>, <code>x/i $eip</code>, <code>x/32xw $esp</code>, <code>disassemble</code>.</li>
+<li>ECE391 reason: Page faults, general protection faults, and corrupted jumps usually require reading CPU state, current instructions, and stack state before the source-level cause is obvious.</li>
+<li>Required scenarios:</li>
+</ul>
+<p>  - Page fault style: access a clearly invalid or unmapped address and identify the faulting instruction.</p>
+<p>  - GPF or invalid-protection style: trigger an invalid instruction or protection-like failure and distinguish it from an ordinary pointer bug.</p>
+<p>  - Bad jump: corrupt a function pointer or return path so execution reaches an unexpected address.</p>
+
+<p>Lab 14: Mini kernel debug</p>
+
+<ul>
+<li>Failure scenario: A tiny kernel or debug target hangs, jumps to the wrong place, fails during early startup, or shows reset/triple-fault-like behavior.</li>
+<li>Commands: <code>target remote</code>, <code>bt</code>, <code>info registers</code>, <code>x</code>, <code>disassemble</code>, <code>break *addr</code>, and optional QEMU logging such as <code>-d int,cpu_reset -D qemu.log</code>.</li>
+<li>ECE391 reason: This combines the previous skills into the kind of &quot;the system does not come up, so I must inspect it myself&quot; workflow used in ECE391.</li>
+<li>Required scenarios:</li>
+</ul>
+<p>  - Early boot hang: the target stops making visible progress.</p>
+<p>  - Wrong entry address: execution starts or jumps somewhere unexpected.</p>
+<p>  - Reset or triple-fault-like behavior: QEMU restarts or returns to startup code before useful output appears.</p>
+
+<h2>Supporting Docs</h2>
+
+<p>The repo should include these supporting docs:</p>
+
+<ul>
+<li><code>docs/command-cheatsheet.md</code>: command lookup organized by symptom.</li>
+<li><code>docs/terminology.md</code>: Chinese-English terminology reference.</li>
+<li><code>docs/ece391-debugging-map.md</code>: map from ECE391-style failure symptoms to debugging commands and labs.</li>
+<li><code>setup/ubuntu-24.04.md</code>: setup steps for Ubuntu 24.04.</li>
+<li><code>setup/packages.md</code>: packages and toolchain notes, including 32-bit and QEMU dependencies.</li>
+</ul>
+
+<h2>Command Lookup by Symptom</h2>
+
+<p>The command cheatsheet should be organized around symptoms, not alphabetic command order.</p>
+
+<p>Example:</p>
+
+<pre><code class="language-text">Program crashed / 程序崩溃:
+  run, bt, frame, info locals, info args
+
+Variable becomes wrong / 变量何时变坏:
+  watch, rwatch, awatch, condition
+
+Pointer looks suspicious / 指针可疑:
+  print ptr, ptype ptr, x/16xw ptr
+
+Stack may be corrupted / 栈可能坏了:
+  bt, info registers, x/32xw $rsp or $esp
+
+Program hangs / 程序卡死:
+  Ctrl-C, bt, info threads, x/i $pc
+
+Source view is not enough / 源码视角不够:
+  disassemble, layout asm, si, ni
+
+QEMU target is stuck / QEMU 目标卡住:
+  target remote :1234, info registers, x/i $eip</code></pre>
+
+<h2>Scope Boundaries</h2>
+
+<p>This design prepares a learning repo. It does not attempt to recreate the full ECE391 codebase or assignments.</p>
+
+<p>The QEMU labs should stay lightweight and educational. They may include a tiny kernel-style debug target, but should avoid becoming a full operating system project. Bootloader, paging, and interrupt concepts can appear as introductory shadows where useful, but the main focus remains debugging workflow.</p>
+
+<h2>Success Criteria</h2>
+
+<p>The project succeeds if the learner can:</p>
+
+<ul>
+<li>Start GDB and use breakpoints, stepping, printing, backtraces, frames, locals, and args without freezing.</li>
+<li>Diagnose common C failure scenarios using a repeatable first-response workflow.</li>
+<li>Inspect memory, addresses, registers, and disassembly with enough confidence to reason about low-level bugs.</li>
+<li>Understand Makefile dependencies, object files, symbols, and link failures well enough to avoid stale-build confusion.</li>
+<li>Connect GDB to a QEMU target and inspect execution state with remote debugging commands.</li>
+<li>Explain core GDB and systems terminology in both English and Chinese.</li>
+<li>Transfer each lab&#x27;s debugging habit to likely ECE391 failure modes.</li>
+</ul>
+</main>
+</body>
+</html>
