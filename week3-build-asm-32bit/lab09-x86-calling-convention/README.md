@@ -239,50 +239,6 @@ esp/ebp describe the current stack frame
 eax holds the return value after the function finishes
 ```
 
-### Why This Helps With Later C/Assembly Bugs
-
-Lab 10 builds directly on this lab.
-
-In a pure C function, the compiler usually follows the calling convention for you. In hand-written assembly, you become responsible for following the convention.
-
-If assembly code breaks the convention, the symptom may appear later in C:
-
-```text
-a variable changes unexpectedly
-a function returns to the wrong place
-the stack pointer is off by one word
-a saved register is corrupted
-GDB backtrace looks strange
-the program crashes after the assembly function returns
-```
-
-To debug that, you need the habits from this lab:
-
-```text
-check eip to see where execution is
-check esp/ebp to see whether the stack looks plausible
-check eax to see the return value
-inspect stack words directly
-step at instruction level
-compare what the calling convention promised with what the code actually did
-```
-
-### Why This Helps With QEMU and Remote Debugging
-
-In later QEMU/GDB remote debugging, the target may not behave like a normal local process. You may attach to a paused CPU and start with almost no friendly output.
-
-Useful first questions are often:
-
-```text
-What is eip?
-What instruction is at eip?
-What is esp?
-What words are on the stack?
-Does the current address match a symbol?
-Does execution look like it reached the expected function?
-```
-
-That is exactly the mental muscle this lab starts building.
 
 ### What You Should Be Able to Say After This Lab
 
@@ -480,6 +436,41 @@ x/i 0x0804925e
 ```
 
 It should show an instruction in the caller after the `call encode_triple` instruction.
+
+
+### Why Use ebp? / 为什么要用 ebp
+
+For beginner debugging, `ebp` is useful because it often gives you a stable map of the current function call:
+
+```text
+ebp + 0   saved old ebp
+ebp + 4   return address
+ebp + 8   first argument
+ebp + 12  second argument
+ebp + 16  third argument
+
+ebp - 4   local variable or temporary storage
+ebp - 8   local variable or temporary storage
+```
+
+`esp` moves as the function uses stack space:
+
+```text
+push      changes esp
+pop       changes esp
+call      changes esp because it pushes the return address
+ret       changes esp because it pops the return address
+local variables may make esp move lower
+```
+
+So if you use only `esp`, the meaning of an address can shift as the function runs. `ebp` stays stable after the function prologue, so it is much easier for a beginner to find arguments, return address, and local variables.
+
+
+```text
+use ebp to understand the frame
+use esp to understand the live stack top
+do not casually overwrite either one in hand-written assembly
+```
 
 ## Guided Mode
 
