@@ -58,6 +58,45 @@ eip
 
 This is why Lab 09/Lab10 uses `-m32`. It lets you practice with the register names and stack behavior that match the 32-bit x86 mental model used later.
 
+### Recommended Build Flags / 推荐编译参数
+
+For this ECE391-style GDB lab, these flags are recommended because the goal is to make 32-bit stack frames, registers, addresses, and calling convention behavior easy to see.
+
+In the official ECE391 MPs, follow the course-provided Makefile. Do not casually change the MP build flags unless the course staff tells you to.
+
+| Flag | Recommendation | What happens if you do not use it? |
+| --- | --- | --- |
+| `-m32` | Usually required for these labs | GCC may build a 64-bit program. Then the registers become `rax/rbx/rsp/rbp`, the calling convention changes, and the output no longer matches the 32-bit ECE391 mental model. |
+| `-g` | Strongly recommended | GDB can still run, but it has much less source-level information. Source lines, function names, variables, and symbols become harder to inspect. |
+| `-O0` | Strongly recommended for teaching/debugging | The compiler may optimize code, reorder instructions, remove variables, inline functions, or make GDB stepping look different from the C source. |
+| `-fno-omit-frame-pointer` | Strongly recommended for learning `esp`/`ebp` | The compiler may stop using `ebp` as a stable frame pointer. Then classic patterns like `ebp + 8` for the first argument become harder to see. |
+| `-fno-pie` | Recommended for this lab | PIE means Position Independent Executable. With PIE and ASLR, the operating system can load the program at different addresses each time it runs, making code addresses harder to predict. |
+| `-no-pie` | Recommended with `-fno-pie` during linking | The final executable may be PIE, so loaded addresses can be less predictable and GDB examples become harder to compare. |
+| `-Wall` | Strongly recommended | GCC reports fewer basic warnings, so simple mistakes may stay hidden. |
+| `-Wextra` | Recommended | GCC reports fewer extra warnings. This may be slightly less strict, but it also catches fewer suspicious patterns. |
+| `-std=c11` | Recommended when the lab expects C11 | The compiler may use a different default C standard, which can create small differences across machines or GCC versions. |
+
+Important ECE391 note:
+
+```text
+Some official ECE391 Makefiles may not explicitly write -O0,
+-fno-omit-frame-pointer, or -fno-pie.
+```
+
+That does not necessarily mean they are trying to get different behavior.
+
+- If no optimization flag such as `-O1`, `-O2`, or `-O3` is used, GCC defaults to no optimization, which is effectively the beginner-friendly `-O0` behavior.
+- In a simple 32-bit `-O0` build, GCC usually keeps `ebp` as the frame pointer anyway, so not writing `-fno-omit-frame-pointer` often has the same practical effect.
+- In a kernel-style ECE391 build that uses flags such as `-nostdlib`, `-static`, and a fixed text address such as `-Ttext=0x400000`, the build is already very different from a normal modern Linux PIE executable. In that setting, not writing `-fno-pie` may still produce the address behavior the course expects.
+
+For this lab, the Makefile writes these flags explicitly because the goal is teaching clarity. Students should be able to read the Makefile and immediately understand what debugging behavior we want.
+
+One-sentence memory:
+
+```text
+These flags are not magic; they make the binary easier to debug and closer to the 32-bit x86 model this lab is teaching.
+```
+
 When you run:
 
 ```gdb
@@ -189,6 +228,91 @@ Frame layout:
 ```
 
 This lab focuses mostly on register preservation, because `broken_helper` violates the callee-saved rule for `ebx`.
+
+### What Is a `.S` File? / `.S` 文件是什么
+
+Lab 10 has two kinds of source files:
+
+```text
+main.c          C source file
+asm_helpers.S  assembly source file
+```
+
+The uppercase `.S` extension means assembly source code that is processed by the C preprocessor before it is assembled.
+
+That is different from lowercase `.s`:
+
+```text
+.s   普通汇编文件，通常直接交给 assembler
+.S   预处理汇编文件，先经过 C preprocessor，再交给 assembler
+```
+
+Preprocessed means the file can use some C-preprocessor features, such as:
+
+```text
+#include
+#define
+#ifdef
+```
+
+This is useful in kernel-style code because assembly files sometimes need constants, macros, or offsets that are shared with C code.
+
+In this lab, `asm_helpers.S` contains hand-written 32-bit x86 assembly functions. GCC can compile it into an object file:
+
+```bash
+gcc -m32 -g -O0 -fno-omit-frame-pointer -fno-pie -c asm_helpers.S -o build/asm_helpers.o
+```
+
+The important part is:
+
+```text
+-c asm_helpers.S -o build/asm_helpers.o
+```
+
+Meaning:
+
+```text
+take asm_helpers.S
+preprocess and assemble it
+produce build/asm_helpers.o
+do not link yet
+```
+
+The C file is compiled separately:
+
+```bash
+gcc -m32 -g -O0 -fno-omit-frame-pointer -fno-pie -Wall -Wextra -std=c11 -c main.c -o build/main.o
+```
+
+Now there are two object files:
+
+```text
+build/main.o          compiled from main.c
+build/asm_helpers.o   assembled from asm_helpers.S
+```
+
+Linking combines those object files into one executable:
+
+```bash
+gcc -m32 -no-pie build/main.o build/asm_helpers.o -o build/lab10
+```
+
+Why linking matters in this lab:
+
+```text
+main.o may refer to a function implemented in asm_helpers.o
+asm_helpers.o provides that function symbol
+the linker connects the reference to the real implementation
+```
+
+That is the build-time version of the C/assembly boundary:
+
+```text
+compile C source       main.c          -> build/main.o
+assemble assembly      asm_helpers.S   -> build/asm_helpers.o
+link object files      main.o + asm_helpers.o -> build/lab10
+debug final program    build/lab10
+```
 
 This lab uses a mixed-debugging loop:
 
