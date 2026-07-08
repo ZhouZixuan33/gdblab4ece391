@@ -2,6 +2,20 @@
 
 Date: 2026-07-08
 
+## RISC-V Pivot Note
+
+After reviewing the ECE391 course note that explicitly references RISC-V instruction-set manuals, RISC-V PLIC specifications, and VirtIO specifications, Week 4 should target a RISC-V QEMU workflow rather than the earlier x86/NASM boot-sector sketch.
+
+For implementation, treat the x86-specific details later in this document as superseded for Week 4:
+
+- Use `qemu-system-riscv64 -machine virt`.
+- Use `.S` RISC-V assembly built with `riscv64-unknown-elf-gcc`.
+- Use `build/kernel.elf` as the QEMU `-kernel` target and GDB symbol file.
+- Teach RISC-V registers such as `pc`, `sp`, `ra`, `a0`, `t0`, and trap-related CSRs instead of x86 `eip` and `esp`.
+- Use RISC-V tooling packages: `qemu-system-misc`, `gcc-riscv64-unknown-elf`, `binutils-riscv64-unknown-elf`, and `gdb-multiarch`.
+
+The high-level goals remain the same: QEMU remote debugging, ELF symbols, entry addresses, register inspection, exception-style failures, and reset/hang triage.
+
 ## Purpose
 
 Week 4 and Week 5 will complete the debugging curriculum by moving from local user-space and 32-bit assembly practice into QEMU remote debugging and ECE391-style kernel debugging.

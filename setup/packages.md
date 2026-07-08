@@ -24,9 +24,13 @@ sudo apt install gcc-multilib libc6-dev-i386
 ## Required for Week 4
 
 ```bash
-sudo apt install qemu-system-x86 gdb-multiarch nasm
+sudo apt install qemu-system-misc gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf gdb-multiarch make
 ```
 
-- `qemu-system-i386`: runs a 32-bit x86 virtual machine target.
+- `qemu-system-riscv64`: runs the RISC-V `virt` virtual machine target.
+- `gcc-riscv64-unknown-elf`: builds freestanding RISC-V `.S` and C targets.
+- `binutils-riscv64-unknown-elf`: provides RISC-V `objcopy`, `objdump`, `nm`, and `readelf`.
 - `gdb-multiarch`: useful for remote debugging targets with architecture differences.
-- `nasm`: assembler used by small boot or kernel-style examples.
+- `make`: runs the lab build, run, debug, and cleanup targets.
+
+Week 4 can sometimes use plain `gdb`, but `gdb-multiarch` is recommended because the target is RISC-V even when the host VM is x86_64.

@@ -26,6 +26,12 @@ For Week 3 32-bit labs, also install:
 sudo apt install gcc-multilib libc6-dev-i386
 ```
 
+For Week 4 QEMU remote-debug labs, also install:
+
+```bash
+sudo apt install qemu-system-misc gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf gdb-multiarch
+```
+
 Then start with:
 
 ```bash
@@ -50,6 +56,12 @@ To compile-check the completed Week 3 labs:
 
 ```bash
 bash scripts/verify-week3.sh
+```
+
+To compile-check the completed Week 4 labs:
+
+```bash
+bash scripts/verify-week4.sh
 ```
 
 ## Why These CFLAGS?

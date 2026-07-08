@@ -283,18 +283,18 @@ First commands:
 ```gdb
 target remote :1234
 info registers
-x/i $eip
+x/i $pc
 continue
 ```
 
-Purpose: connect to the paused or running QEMU target and inspect CPU state.
+Purpose: connect to the paused or running RISC-V QEMU target and inspect CPU state.
 
 ## QEMU Reset or Triple-Fault-Like Behavior / QEMU 重启或疑似三重故障
 
 First commands:
 
 ```bash
-qemu-system-i386 ... -d int,cpu_reset -D qemu.log
+qemu-system-riscv64 ... -d int,cpu_reset -D qemu.log
 ```
 
 Then in GDB:
@@ -302,7 +302,63 @@ Then in GDB:
 ```gdb
 target remote :1234
 info registers
-x/i $eip
+x/i $pc
 ```
 
 Purpose: determine whether exception handling failed badly enough to reset the virtual CPU.
+
+## Week 4 QEMU Remote Debugging Add-ons
+
+If QEMU was started with `-S`, it is expected to wait until GDB sends `continue`.
+
+Remote breakpoint by function does not work:
+
+```gdb
+info files
+info functions
+break kernel_entry
+```
+
+From the shell:
+
+```bash
+riscv64-unknown-elf-nm -n build/kernel.elf
+riscv64-unknown-elf-objdump -d build/kernel.elf
+```
+
+Purpose: confirm that GDB loaded the symbol-bearing ELF and that the function name exists at the address you expect.
+
+Entry address looks wrong:
+
+```bash
+riscv64-unknown-elf-nm -n build/kernel.elf
+riscv64-unknown-elf-objdump -d build/kernel.elf
+```
+
+```gdb
+info files
+p/x $pc
+x/i $pc
+break *0x80000000
+```
+
+Purpose: compare the CPU's current instruction pointer with the link address and symbol table.
+
+Stack looks wrong in QEMU:
+
+```gdb
+info registers
+p/x $sp
+x/32gx $sp
+bt
+```
+
+Purpose: decide whether the target has a plausible RISC-V stack before trusting calls, returns, or backtraces.
+
+In Week 4 lab directories, use:
+
+```bash
+make log
+```
+
+Purpose: run QEMU with `-d int,cpu_reset -D build/.../qemu.log` for reset-like failures.

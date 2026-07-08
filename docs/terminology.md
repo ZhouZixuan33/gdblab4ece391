@@ -132,7 +132,7 @@ Extra arguments, large structs, saved return addresses, and local stack storage 
 
 ## instruction pointer / 指令指针
 
-Meaning / 是什么: the register holding the address of the current or next instruction. On x86 it is `eip`; on x86_64 it is `rip`.
+Meaning / 是什么: the register holding the address of the current or next instruction. On RISC-V it is `pc`; on x86 it is `eip`; on x86_64 it is `rip`.
 
 How it appears in GDB / 在 GDB 里怎么看:
 
@@ -326,9 +326,113 @@ Meaning / 是什么: exception handling failed so badly that the CPU resets.
 How it appears in QEMU / 在 QEMU 里怎么看:
 
 ```bash
-qemu-system-i386 ... -d int,cpu_reset -D qemu.log
+qemu-system-riscv64 ... -d int,cpu_reset -D qemu.log
 ```
 
 Debugging use / 调试时怎么用: suspect it when QEMU instantly reboots, goes black, or jumps back to startup code.
 
 ECE391 connection / 和 ECE391 的联系: early kernel bugs in IDT, paging, stacks, or exception handlers may leave the CPU unable to report the original error.
+
+## QEMU / QEMU
+
+Meaning / 是什么: a machine emulator used in Week 4 to run a tiny RISC-V `virt` target outside a normal Linux process.
+
+How it appears in commands / 在命令里怎么看?
+
+```bash
+qemu-system-riscv64 -machine virt -nographic -bios none -kernel build/kernel.elf
+```
+
+Debugging use / 调试时怎么用? run a kernel-style target in a controlled virtual machine.
+
+ECE391 connection / 和 ECE391 的联系: many early-kernel failures are easier and safer to reproduce in QEMU than on real hardware.
+
+## remote target / 远程调试目标
+
+Meaning / 是什么: the CPU or program controlled by GDB through a remote connection instead of a local `run` command.
+
+How it appears in GDB / 在 GDB 里怎么看?
+
+```gdb
+target remote :1234
+```
+
+Debugging use / 调试时怎么用? attach GDB to the virtual CPU exposed by QEMU.
+
+ECE391 connection / 和 ECE391 的联系: kernel code is not a normal user-space process, so GDB often controls it through QEMU's remote stub.
+
+## symbol file / 符号文件
+
+Meaning / 是什么: an ELF file that tells GDB the names and addresses of functions and global data.
+
+How it appears in GDB / 在 GDB 里怎么看?
+
+```gdb
+symbol-file build/kernel.elf
+info functions
+```
+
+Debugging use / 调试时怎么用? load readable names such as `kernel_entry` so you can set symbolic breakpoints.
+
+ECE391 connection / 和 ECE391 的联系: if GDB uses the wrong symbol file, breakpoints and source locations can point to the wrong code.
+
+## entry point / 入口点
+
+Meaning / 是什么: the first target instruction or function that should run after QEMU loads the target or after setup code jumps into the kernel.
+
+How it appears in tools / 在工具里怎么看?
+
+```bash
+nm -n build/kernel.elf
+```
+
+```gdb
+break kernel_entry
+break *0x80000000
+```
+
+Debugging use / 调试时怎么用? prove whether the CPU reached the code that was supposed to start execution.
+
+ECE391 connection / 和 ECE391 的联系: wrong entry addresses can make a kernel appear dead before any useful output exists.
+
+## link address / 链接地址
+
+Meaning / 是什么: the address where the linker assumes code and data will live when the target runs.
+
+How it appears in files / 在文件里怎么看?
+
+```ld
+. = 0x80000000;
+```
+
+Debugging use / 调试时怎么用? compare GDB's symbol addresses with the CPU's `pc`.
+
+ECE391 connection / 和 ECE391 的联系: a mismatch between load address, link address, and symbol file can make breakpoints miss or disassembly look unrelated.
+
+## boot image / 启动镜像
+
+Meaning / 是什么: the raw disk, kernel image, or ELF target that QEMU loads to start a virtual machine.
+
+How it appears in commands / 在命令里怎么看?
+
+```bash
+qemu-system-riscv64 -machine virt -nographic -bios none -kernel build/kernel.elf
+```
+
+Debugging use / 调试时怎么用? QEMU runs the target artifact, while GDB uses ELF symbols to map addresses to names.
+
+ECE391 connection / 和 ECE391 的联系: kernel debugging often involves more than one artifact: bootable image, ELF with symbols, object files, and logs.
+
+## QEMU log / QEMU 日志
+
+Meaning / 是什么: a file QEMU writes with CPU, interrupt, exception, or reset details.
+
+How it appears in commands / 在命令里怎么看?
+
+```bash
+qemu-system-riscv64 ... -d int,cpu_reset -D qemu.log
+```
+
+Debugging use / 调试时怎么用? inspect reset-like behavior when the target fails too quickly for interactive debugging.
+
+ECE391 connection / 和 ECE391 的联系: early exception handling bugs may reset the virtual CPU before source-level debugging shows the original fault.

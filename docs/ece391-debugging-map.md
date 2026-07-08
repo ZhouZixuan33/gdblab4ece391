@@ -15,6 +15,16 @@ This map connects course-style symptoms to the labs and first commands to try.
 | C source is not enough | `disassemble`, `info registers`, `si`, `ni` | Lab 09 |
 | C and assembly disagree | `layout asm`, `x/i $eip`, `stepi` | Lab 10 |
 | QEMU target is paused | `target remote :1234`, `continue` | Lab 11 |
-| Need to stop in QEMU code | `symbol-file`, `break`, `break *addr` | Lab 12 |
-| Exception-like failure | `info registers`, `x/i $eip`, `x/32xw $esp` | Lab 13 |
+| Need to stop in QEMU code | `break`, `break *addr`, `info functions` | Lab 12 |
+| Exception-like failure | `info registers`, `x/i $pc`, `x/32gx $sp` | Lab 13 |
 | Early boot reset or hang | QEMU `-d int,cpu_reset`, GDB remote | Lab 14 |
+
+## Week 4 QEMU Triage
+
+| Symptom | First Question | First Commands |
+| --- | --- | --- |
+| QEMU shows no target output after `make debug` | Is the CPU paused by `-S`? | `target remote :1234`, `continue` |
+| Function breakpoint fails | Did GDB open the correct ELF symbol file? | `gdb-multiarch build/kernel.elf`, `info functions` |
+| Entry address looks wrong | What address did the linker assign? | `riscv64-unknown-elf-nm -n build/kernel.elf`, `info files`, `break *0x80000000` |
+| Target hangs after a checkpoint | Where is `pc` now? | `Ctrl-C`, `info registers`, `x/i $pc` |
+| Target resets or exits too quickly | What did QEMU log before reset? | `make log`, inspect `build/.../qemu.log` |
