@@ -1,14 +1,15 @@
-#include <stdio.h>
-
 struct boot_request {
     int arg0;
     int arg1;
     int arg2;
 };
 
+volatile int g_expected;
+volatile int g_actual;
+volatile int g_done;
+
 __attribute__((noinline))
 int encode_triple(int first, int second, int third) {
-    /* Local stack storage makes esp and ebp visibly different in GDB. */
     volatile int scratch[4];
     int encoded = first + (second * 10) + (third * 100);
 
@@ -21,7 +22,6 @@ int encode_triple(int first, int second, int third) {
 }
 
 static int dispatch_request(const struct boot_request *request) {
-    /* Intentional bug: arg1 and arg2 are swapped at the call site. */
     return encode_triple(request->arg0, request->arg2, request->arg1);
 }
 
@@ -31,13 +31,10 @@ int main(void) {
         .arg1 = 2,
         .arg2 = 3,
     };
-    int expected = encode_triple(request.arg0, request.arg1, request.arg2);
-    int actual = dispatch_request(&request);
 
-    printf("Request args: arg0=%d arg1=%d arg2=%d\n", request.arg0, request.arg1, request.arg2);
-    printf("Expected encode_triple(arg0, arg1, arg2): %d\n", expected);
-    printf("Actual dispatched encoding: %d\n", actual);
-    printf("Expected the dispatcher to preserve argument order.\n");
+    g_expected = encode_triple(request.arg0, request.arg1, request.arg2);
+    g_actual = dispatch_request(&request);
+    g_done = 1;
 
-    return 0;
+    return g_actual == g_expected ? 0 : 1;
 }

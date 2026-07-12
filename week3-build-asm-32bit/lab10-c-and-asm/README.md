@@ -1,602 +1,342 @@
-# Lab 10: Mixed C and Assembly Debugging
+# Lab 10: Mixed C and RISC-V Assembly Inspection
 
 ## Goal
 
-Understand the 32-bit x86 calling convention used when C code calls assembly code, especially how caller-saved and callee-saved registers divide responsibility across a function call.
+Understand the RV32 calling convention used when C code calls hand-written RISC-V assembly.
 
-Use `disassemble`, `info registers`, `x/i $eip`, `stepi`, `nexti`, and `x/16xw $esp` to debug across a C/assembly boundary and recognize a callee-saved register violation.
+Week 3 stays at the static build/disassembly layer. You will compile C and `.S` files into RV32 object files, inspect symbols and disassembly, and identify a callee-saved register violation without using QEMU yet.
 
-By the end of this lab, students should understand that a calling convention is the low-level contract that explains:
+By the end of this lab, students should understand:
 
-- how arguments are passed
-- where return values are placed
-- who saves which registers
-- how `call` and `ret` move control between functions
-- how the stack must be kept balanced
-- why hand-written assembly must follow the same rules as compiler-generated C code
+- how C can call a function implemented in `.S`
+- where RV32 return values appear
+- which registers are caller-saved
+- which registers are callee-saved
+- why assembly code must follow the same calling convention as compiler-generated C code
 
+Week 4 will use QEMU and GDB remote debugging to observe live register values while a target is running.
 
 ## Setup Requirement / 环境要求
 
-This lab builds a 32-bit x86 executable on a normal 64-bit Ubuntu machine. The Makefile uses:
-
-```makefile
--m32
-```
-
-`-m32` tells GCC to generate 32-bit x86 code. On Ubuntu, this requires extra 32-bit development packages. Before starting Lab 09, install:
+This lab uses the RISC-V cross toolchain:
 
 ```bash
-sudo apt update
-sudo apt install gcc-multilib libc6-dev-i386
+sudo apt install gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf make
 ```
 
-Why these packages matter:
-
-- `gcc-multilib`: lets GCC build 32-bit programs on a 64-bit system.
-- `libc6-dev-i386`: provides 32-bit C library headers and startup files. Without it, even `#include <stdio.h>` can fail.
-
-If you see this error:
+The Makefile uses:
 
 ```text
-fatal error: bits/libc-header-start.h: No such file or directory
+riscv64-unknown-elf-gcc
+-march=rv32im
+-mabi=ilp32
 ```
 
-it usually means the 32-bit C development headers are missing. Install the packages above, then run:
-
-ECE391-style x86 work uses the 32-bit register view much more often:
+This lab produces object files and disassembly artifacts:
 
 ```text
-eax
-ebx
-ecx
-edx
-esp
-ebp
-eip
+build/main.o
+build/asm_helpers.o
+build/lab10.combined.o
+build/main.s
+build/asm_helpers.dump
+build/lab10.combined.dump
 ```
 
-This is why Lab 09/Lab10 uses `-m32`. It lets you practice with the register names and stack behavior that match the 32-bit x86 mental model used later.
-
-### Recommended Build Flags / 推荐编译参数
-
-For this ECE391-style GDB lab, these flags are recommended because the goal is to make 32-bit stack frames, registers, addresses, and calling convention behavior easy to see.
-
-In the official ECE391 MPs, follow the course-provided Makefile. Do not casually change the MP build flags unless the course staff tells you to.
-
-| Flag | Recommendation | What happens if you do not use it? |
-| --- | --- | --- |
-| `-m32` | Usually required for these labs | GCC may build a 64-bit program. Then the registers become `rax/rbx/rsp/rbp`, the calling convention changes, and the output no longer matches the 32-bit ECE391 mental model. |
-| `-g` | Strongly recommended | GDB can still run, but it has much less source-level information. Source lines, function names, variables, and symbols become harder to inspect. |
-| `-O0` | Strongly recommended for teaching/debugging | The compiler may optimize code, reorder instructions, remove variables, inline functions, or make GDB stepping look different from the C source. |
-| `-fno-omit-frame-pointer` | Strongly recommended for learning `esp`/`ebp` | The compiler may stop using `ebp` as a stable frame pointer. Then classic patterns like `ebp + 8` for the first argument become harder to see. |
-| `-fno-pie` | Recommended for this lab | PIE means Position Independent Executable. With PIE and ASLR, the operating system can load the program at different addresses each time it runs, making code addresses harder to predict. |
-| `-no-pie` | Recommended with `-fno-pie` during linking | The final executable may be PIE, so loaded addresses can be less predictable and GDB examples become harder to compare. |
-| `-Wall` | Strongly recommended | GCC reports fewer basic warnings, so simple mistakes may stay hidden. |
-| `-Wextra` | Recommended | GCC reports fewer extra warnings. This may be slightly less strict, but it also catches fewer suspicious patterns. |
-| `-std=c11` | Recommended when the lab expects C11 | The compiler may use a different default C standard, which can create small differences across machines or GCC versions. |
-
-Important ECE391 note:
-
-```text
-Some official ECE391 Makefiles may not explicitly write -O0,
--fno-omit-frame-pointer, or -fno-pie.
-```
-
-That does not necessarily mean they are trying to get different behavior.
-
-- If no optimization flag such as `-O1`, `-O2`, or `-O3` is used, GCC defaults to no optimization, which is effectively the beginner-friendly `-O0` behavior.
-- In a simple 32-bit `-O0` build, GCC usually keeps `ebp` as the frame pointer anyway, so not writing `-fno-omit-frame-pointer` often has the same practical effect.
-- In a kernel-style ECE391 build that uses flags such as `-nostdlib`, `-static`, and a fixed text address such as `-Ttext=0x400000`, the build is already very different from a normal modern Linux PIE executable. In that setting, not writing `-fno-pie` may still produce the address behavior the course expects.
-
-For this lab, the Makefile writes these flags explicitly because the goal is teaching clarity. Students should be able to read the Makefile and immediately understand what debugging behavior we want.
-
-One-sentence memory:
-
-```text
-These flags are not magic; they make the binary easier to debug and closer to the 32-bit x86 model this lab is teaching.
-```
-
-When you run:
-
-```gdb
-info registers
-```
-
-you should learn to find these first:
-
-```text
-eip: instruction pointer, where the CPU is executing
-esp: stack pointer, where the current stack top is
-ebp: frame pointer, a stable anchor for the current function frame
-eax: common integer return-value register
-```
+It does not produce a runnable QEMU target.
 
 ## Failure Scenario
 
-Run the program:
+Build the lab:
 
 ```bash
-make run
+make
 ```
 
-Expected output:
+The C file declares:
 
-```text
-Mixed C/assembly register preservation check
-check_preserves_ebx returned: 1
-FAIL: broken_helper changed ebx without restoring it.
-Expected callee-saved registers to survive a function call.
+```c
+int check_preserves_s1(void);
 ```
 
-The C program calls `check_preserves_ebx()`, an assembly checker. The checker sets `ebx` to a sentinel value, calls `broken_helper`, then checks whether `ebx` survived the call.
+`check_preserves_s1` is implemented in `asm_helpers.S`. It sets `s1` to a sentinel value, calls `broken_helper`, then checks whether `s1` survived the call.
 
 `broken_helper` is intentionally wrong:
 
 ```asm
 broken_helper:
-    movl $0x0badc0de, %ebx
-    movl $7, %eax
+    li s1, 0x0badc0de
+    li a0, 7
     ret
 ```
 
-On 32-bit x86, `ebx` is callee-saved. A function that changes it must restore it before returning.
+On RV32, `s1` is callee-saved. A function that changes it must restore it before returning.
 
-If the build fails with a `-m32` or missing header/library error, install 32-bit support:
+The static bug to find:
 
-```bash
-sudo apt install gcc-multilib libc6-dev-i386
+```text
+broken_helper writes s1
+broken_helper does not save old s1
+broken_helper does not restore old s1 before ret
 ```
-
-## Where This Shows Up / Common Scenarios
-
-This pattern appears when execution crosses between C and assembly:
-
-- context switch helpers
-- interrupt or syscall entry stubs
-- hand-written register save/restore code
-- boot or kernel startup helpers
-- functions that appear to corrupt unrelated C state after returning
-
-In ECE391-style code, a register preservation bug may look like a random C variable changed. The real bug can be in the assembly boundary.
 
 ## Concept Warmup
 
 ### Calling Convention / 调用约定
 
-A calling convention is an agreement between the caller and the callee about how a function call works at the machine-instruction level.
+A calling convention is an agreement between caller and callee about how a function call works at the machine-instruction level.
 
-In C, a function call looks simple:
-
-```c
-result = helper(1, 2, 3);
-```
-
-But the CPU does not understand "function call" as a high-level C idea. At the assembly level, the program has to answer concrete questions:
+For RV32, the practical model is:
 
 ```text
-Where do the arguments go?
-Where does the return value go?
-Which instruction jumps into the function?
-How does the function jump back?
-Who cleans up the stack?
-Which registers may change?
-Which registers must survive?
+a0-a7       argument registers and return-value registers
+t0-t6       temporary registers, caller-saved
+s0-s11      saved registers, callee-saved
+ra          return address register
+sp          stack pointer
+pc          current instruction address
 ```
 
-The calling convention answers these questions so separately compiled code can still work together. This matters a lot when C code calls hand-written assembly, because the C compiler will follow the convention automatically, but your assembly code must follow it manually.
-
-For the simple 32-bit x86 style used in these labs, the beginner model is:
-
-```text
-arguments are passed on the stack
-call pushes the return address
-ret jumps back through that return address
-eax usually holds the integer return value
-eax/ecx/edx are caller-saved
-ebx/esi/edi/ebp are callee-saved
-esp is the live stack pointer and must stay balanced
-```
-
-Calling convention usually includes several related rules:
-
-```text
-Argument passing:
-    Are arguments passed on the stack or in registers?
-
-Return value:
-    Which register carries the return value back to the caller?
-
-Register preservation:
-    Which registers may the callee freely change?
-    Which registers must the callee restore before returning?
-
-Stack discipline:
-    Who pushes arguments?
-    Who removes arguments?
-    Where are local variables stored?
-    What must be true about esp before ret?
-
-Control flow:
-    What does call do?
-    What does ret do?
-    Where is the return address stored?
-
-Frame layout:
-    Is ebp used as a stable frame pointer?
-    Where are arguments and local variables relative to ebp?
-```
-
-This lab focuses mostly on register preservation, because `broken_helper` violates the callee-saved rule for `ebx`.
+This lab focuses on register preservation. `broken_helper` violates the callee-saved rule for `s1`.
 
 ### What Is a `.S` File? / `.S` 文件是什么
 
-Lab 10 has two kinds of source files:
+Lab 10 has two source files:
 
 ```text
-main.c          C source file
-asm_helpers.S  assembly source file
+main.c         C source file
+asm_helpers.S RISC-V assembly helper functions
 ```
 
 The uppercase `.S` extension means assembly source code that is processed by the C preprocessor before it is assembled.
 
-That is different from lowercase `.s`:
+Difference:
 
 ```text
-.s   普通汇编文件，通常直接交给 assembler
-.S   预处理汇编文件，先经过 C preprocessor，再交给 assembler
+.s   ordinary assembly source, usually sent directly to the assembler
+.S   preprocessed assembly source, then assembled
 ```
 
-Preprocessed means the file can use some C-preprocessor features, such as:
+This is useful in kernel-style code because assembly files often need constants, macros, or offsets shared with C code.
+
+Build flow:
 
 ```text
-#include
-#define
-#ifdef
+main.c         -> build/main.o
+asm_helpers.S -> build/asm_helpers.o
+main.o + asm_helpers.o -> build/lab10.combined.o
 ```
 
-This is useful in kernel-style code because assembly files sometimes need constants, macros, or offsets that are shared with C code.
+The combined object is not a runnable program. It is a convenient artifact for symbol and disassembly inspection.
 
-In this lab, `asm_helpers.S` contains hand-written 32-bit x86 assembly functions. GCC can compile it into an object file:
+### Compile and Link / 编译和链接
+
+Compile C:
 
 ```bash
-gcc -m32 -g -O0 -fno-omit-frame-pointer -fno-pie -c asm_helpers.S -o build/asm_helpers.o
+riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -g -O0 -fno-omit-frame-pointer -Wall -Wextra -std=c11 -c main.c -o build/main.o
 ```
 
-The important part is:
-
-```text
--c asm_helpers.S -o build/asm_helpers.o
-```
-
-Meaning:
-
-```text
-take asm_helpers.S
-preprocess and assemble it
-produce build/asm_helpers.o
-do not link yet
-```
-
-The C file is compiled separately:
+Assemble `.S`:
 
 ```bash
-gcc -m32 -g -O0 -fno-omit-frame-pointer -fno-pie -Wall -Wextra -std=c11 -c main.c -o build/main.o
+riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -g -O0 -fno-omit-frame-pointer -c asm_helpers.S -o build/asm_helpers.o
 ```
 
-Now there are two object files:
-
-```text
-build/main.o          compiled from main.c
-build/asm_helpers.o   assembled from asm_helpers.S
-```
-
-Linking combines those object files into one executable:
+Combine object files:
 
 ```bash
-gcc -m32 -no-pie build/main.o build/asm_helpers.o -o build/lab10
+riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -r build/main.o build/asm_helpers.o -o build/lab10.combined.o
 ```
 
-Why linking matters in this lab:
+Why combine them?
 
 ```text
-main.o may refer to a function implemented in asm_helpers.o
-asm_helpers.o provides that function symbol
-the linker connects the reference to the real implementation
-```
-
-That is the build-time version of the C/assembly boundary:
-
-```text
-compile C source       main.c          -> build/main.o
-assemble assembly      asm_helpers.S   -> build/asm_helpers.o
-link object files      main.o + asm_helpers.o -> build/lab10
-debug final program    build/lab10
-```
-
-This lab uses a mixed-debugging loop:
-
-```text
-stop before the assembly call -> record registers -> step into assembly -> inspect instructions -> compare registers after return -> identify the calling convention violation
+main.o refers to check_preserves_s1
+asm_helpers.o defines check_preserves_s1
+the combined object lets you inspect both sides together
 ```
 
 ### Register Responsibility / 寄存器责任
 
-In ECE391-style 32-bit x86 debugging, the question is not "which registers can I use freely?" The better question is:
+The question is not "which registers can I use freely?" The better question is:
 
 ```text
 Who is responsible for protecting this register across a function call?
 ```
 
-Calling convention divides register responsibility so caller and callee do not have to guess what the other side will preserve.
-
-Practical memory table:
+Practical RV32 memory table:
 
 ```text
-eax     return value, caller-saved
-ecx     counter/temp, caller-saved
-edx     data/temp, caller-saved
-
-ebx     callee-saved
-esi     callee-saved
-edi     callee-saved
-ebp     frame pointer, callee-saved, do not casually clobber
-
-esp     stack pointer, must stay balanced
-eip     instruction pointer, changed by call/ret/jmp/int/iret
-eflags  condition/control flags
+a0-a7   arguments and return values, caller-saved
+t0-t6   temporary registers, caller-saved
+s0-s11  saved registers, callee-saved
+ra      return address, caller-saved in the ABI sense
+sp      stack pointer, must stay balanced
+pc      current instruction address
 ```
 
 Meaning:
 
 ```text
-eax/ecx/edx can be used for temporary values, but the caller must know a call may change them.
-ebx/esi/edi can be used, but the callee must restore them if it changes them.
-ebp is callee-saved too, but it often has a special job as the frame pointer.
-esp is the stack top and must remain balanced.
-eip is where the CPU is executing; control-flow instructions change it.
-eflags is CPU state; many conditional jumps depend on it.
+a-registers can pass arguments and return values, but calls may change them.
+t-registers are temporary; callers should not expect them to survive calls.
+s-registers may be used by a callee, but the callee must restore them.
+sp must point to a valid stack and be restored before returning.
+ra tells ret where to go back.
 ```
-
-This is why a function may freely return a value in `eax`, but it may not freely destroy `ebx` or `ebp`.
 
 ### Caller-Saved Register / 调用者保存寄存器
 
 Caller means the function that makes a function call.
 
-Caller-saved does not mean "the CPU saves it for the caller." It means the caller is responsible for saving the value if the caller still needs it after the call.
-
-On 32-bit x86, the most important caller-saved registers for this lab are:
+Caller-saved means:
 
 ```text
-eax
-ecx
-edx
+If the caller still needs the value after a call,
+the caller must save it before the call.
 ```
 
-These registers are allowed to change across a function call. If a callee changes `eax`, `ecx`, or `edx`, that is usually not a callee bug.
-
-Example:
-
-```asm
-movl $1234, %eax
-call some_function
-```
-
-After `call some_function`, the caller should not assume `eax` is still `1234`. `some_function` may have used `eax` as a temporary register, and `eax` is also commonly used for the return value.
-
-If the caller really needs the old `eax` value, the caller must protect it:
-
-```asm
-pushl %eax
-call some_function
-popl %eax
-```
-
-Beginner rule:
+Important RV32 caller-saved registers:
 
 ```text
-If I am the caller and I need eax/ecx/edx after a call,
-I must save them myself before the call.
+a0-a7
+t0-t6
+ra
 ```
 
+After a call, the caller should not assume `a0` still contains the old argument value. `a0` may contain the callee's return value.
 
 ### Callee-Saved Register / 被调用者保存寄存器
 
 Callee means the function being called.
 
-A callee-saved register must have the same value when a function returns as it had when the function was called.
-
-On 32-bit x86, the most important callee-saved registers for this lab are:
+Callee-saved means:
 
 ```text
-ebx
-esi
-edi
-ebp
+If the callee changes the register,
+the callee must restore the original value before returning.
 ```
 
-This does not mean the callee can never use these registers. It means the callee must restore the original value before returning if it changes one of them.
+Important RV32 callee-saved registers:
 
-A correct callee that wants to use `ebx` usually does something like this:
+```text
+s0-s11
+```
+
+A correct callee that wants to use `s1` usually does something like this:
 
 ```asm
-pushl %ebx
-movl  $0x0badc0de, %ebx
-/* use ebx */
-popl  %ebx
+addi sp, sp, -16
+sw   s1, 12(sp)
+
+li   s1, 0x0badc0de
+# use s1
+
+lw   s1, 12(sp)
+addi sp, sp, 16
 ret
 ```
 
-The `pushl %ebx` saves the caller's old `ebx` value. The `popl %ebx` restores it before returning. From the caller's point of view, `ebx` survived the function call.
-
-For this lab:
-
-```text
-ebx should be preserved by broken_helper
-eax may be used for the return value
-esp should still point to a valid stack
-eip shows the current instruction
-```
-
-Beginner rule:
-
-```text
-If I am the callee and I change ebx/esi/edi/ebp,
-I must put them back before returning.
-```
-
-The full picture is:
-
-```text
-caller-saved: caller protects the value if the caller still needs it
-callee-saved: callee protects the value if the callee changes it
-```
-
-### Instruction-Level Stepping / 指令级单步
-
-Useful commands:
-
-```gdb
-disassemble broken_helper
-x/i $eip
-stepi
-nexti
-info registers
-```
-
-`stepi` executes one machine instruction and enters calls.
-
-`nexti` executes one machine instruction but steps over calls.
+Lab 10 is built around this exact rule. `broken_helper` changes `s1` but does not restore it.
 
 ## Guided Mode
 
-Step 1: Build and run.
+Step 1: Build artifacts.
 
 ```bash
 make
-make run
 ```
 
-What to look for / 看什么: the checker returns `1`, meaning `ebx` changed across a function call that should have preserved it.
-
-Step 2: Start GDB and set breakpoints.
+Step 2: Inspect symbols.
 
 ```bash
-gdb ./build/lab10
+riscv64-unknown-elf-nm build/main.o build/asm_helpers.o build/lab10.combined.o
 ```
 
-```gdb
-break main
-break check_preserves_ebx
-break broken_helper
-run
+What to look for / 看什么:
+
+```text
+main.o has an undefined reference to check_preserves_s1 before combining
+asm_helpers.o defines check_preserves_s1
+asm_helpers.o defines broken_helper
 ```
 
-Step 3: Continue to the assembly checker.
+Step 3: Inspect assembly helper disassembly.
 
-```gdb
-continue
-info registers
-disassemble check_preserves_ebx
+```bash
+less build/asm_helpers.dump
 ```
 
-What to look for / 看什么: the checker saves the original `ebx`, writes sentinel `0x39139139` into `ebx`, then calls `broken_helper`.
+Or:
 
-Step 4: Stop in `broken_helper`.
-
-```gdb
-continue
-info registers
-x/i $eip
-disassemble broken_helper
+```bash
+riscv64-unknown-elf-objdump -dr build/asm_helpers.o
 ```
 
-What to look for / 看什么: `broken_helper` is about to execute instructions that write to `ebx`.
+What to look for / 看什么:
 
-Step 5: Step the bad instruction.
-
-```gdb
-stepi
-info registers ebx eax eip esp ebp
+```text
+check_preserves_s1 saves s1 before using it
+broken_helper writes s1
+broken_helper returns without restoring s1
 ```
 
-What to look for / 看什么: `ebx` becomes `0x0badc0de`.
+Step 4: Inspect the combined object.
 
-Step 6: Return to the checker.
-
-```gdb
-finish
-info registers ebx eax eip esp ebp
+```bash
+less build/lab10.combined.dump
 ```
 
-What to look for / 看什么: the checker observes that `ebx` no longer equals the sentinel.
+What to look for / 看什么: C-side symbol references and assembly-side symbol definitions are now in one object artifact.
 
-Step 7: Inspect stack context.
+Step 5: Explain the bug.
 
-```gdb
-x/16xw $esp
-bt
+Expected explanation:
+
+```text
+s1 is callee-saved in RV32.
+broken_helper is a callee.
+broken_helper modifies s1.
+broken_helper does not restore the original s1 before ret.
+Therefore broken_helper violates the calling convention.
 ```
 
-Why this helps / 为什么有用: mixed C/assembly bugs can damage the stack too. This lab does not intentionally corrupt `esp`, but you should practice checking it.
+## Fix Idea
 
-Step 8: Explain the fix.
-
-The broken helper should save and restore `ebx`:
+The broken helper should save and restore `s1`:
 
 ```asm
 broken_helper:
-    pushl %ebx
-    movl $0x0badc0de, %ebx
-    movl $7, %eax
-    popl %ebx
+    addi sp, sp, -16
+    sw   s1, 12(sp)
+    li   s1, 0x0badc0de
+    li   a0, 7
+    lw   s1, 12(sp)
+    addi sp, sp, 16
     ret
 ```
 
-## Hint Mode
-
-1. Run the program and note the checker return value.
-2. Break on `check_preserves_ebx` and `broken_helper`.
-3. Disassemble both assembly functions.
-4. Record `ebx` before and after stepping through `broken_helper`.
-5. Use `x/i $eip` to identify the current instruction.
-6. Explain which register preservation rule was violated.
+This lab intentionally leaves the bug in place so students can practice finding it.
 
 ## Review Questions
 
-1. What command disassembles the assembly helper?
+1. Which RV32 register carries the integer return value?
 
-   Answer:
+   Answer: `a0`.
 
-   ```gdb
-   disassemble broken_helper
-   ```
+2. Which RV32 register carries the return address?
 
-2. What command shows the instruction at the current instruction pointer?
+   Answer: `ra`.
 
-   Answer:
+3. Is `s1` caller-saved or callee-saved?
 
-   ```gdb
-   x/i $eip
-   ```
+   Answer: callee-saved.
 
-3. What command steps one machine instruction?
+4. Why is clobbering `s1` a bug here?
 
-   Answer:
+   Answer: `s1` is callee-saved, so a function that changes it must restore it before returning.
 
-   ```gdb
-   stepi
-   ```
+5. How should `broken_helper` fix the bug?
 
-4. Which register is intentionally clobbered in this lab?
-
-   Answer: `ebx`.
-
-5. Why is clobbering `ebx` a bug here?
-
-   Answer: `ebx` is callee-saved in this 32-bit calling convention, so a function that changes it must restore it before returning.
-
-6. What is the conceptual fix?
-
-   Answer: save `ebx` before modifying it and restore it before `ret`, for example with `pushl %ebx` and `popl %ebx`.
+   Answer: save `s1` before modifying it and restore `s1` before `ret`.

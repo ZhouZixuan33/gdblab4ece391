@@ -1,32 +1,35 @@
-    .text
-    .globl check_preserves_ebx
-    .type check_preserves_ebx, @function
-check_preserves_ebx:
-    pushl %ebp
-    movl %esp, %ebp
-    pushl %ebx
+    .section .text
+    .globl check_preserves_s1
+    .type check_preserves_s1, @function
+check_preserves_s1:
+    addi sp, sp, -16
+    sw ra, 12(sp)
+    sw s0, 8(sp)
+    sw s1, 4(sp)
+    addi s0, sp, 16
 
-    movl $0x39139139, %ebx
+    li s1, 0x39139139
     call broken_helper
-    cmpl $0x39139139, %ebx
-    jne .Lbad_preserve
 
-    movl $0, %eax
-    jmp .Ldone_preserve
+    li t0, 0x39139139
+    bne s1, t0, bad_preserve
 
-.Lbad_preserve:
-    movl $1, %eax
+    li a0, 0
+    j done_preserve
 
-.Ldone_preserve:
-    popl %ebx
-    leave
+bad_preserve:
+    li a0, 1
+
+done_preserve:
+    lw s1, 4(sp)
+    lw s0, 8(sp)
+    lw ra, 12(sp)
+    addi sp, sp, 16
     ret
 
     .globl broken_helper
     .type broken_helper, @function
 broken_helper:
-    movl $0x0badc0de, %ebx
-    movl $7, %eax
+    li s1, 0x0badc0de
+    li a0, 7
     ret
-
-    .section .note.GNU-stack,"",@progbits

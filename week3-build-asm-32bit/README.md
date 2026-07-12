@@ -1,23 +1,29 @@
-# Week 3: Makefile, 32-bit x86, and Assembly View
+# Week 3: Makefile, Symbols, RISC-V 32, and Assembly View
 
-Week 3 bridges source-level C debugging to build artifacts, symbols, registers, 32-bit stack layout, and mixed C/assembly debugging. The main habit is to ask what layer you are actually debugging: source file, object file, linked binary, CPU register state, or assembly helper.
+Week 3 bridges source-level C debugging to build artifacts, symbols, RV32 calling convention, and mixed C/assembly inspection. The main habit is to ask what layer you are actually debugging: source file, object file, symbol table, disassembly, or assembly helper.
 
 ## Labs
 
 - `lab07-makefile-deps`: debug stale builds caused by missing header dependencies.
 - `lab08-linker-symbols`: inspect object files and symbols behind linker errors and GDB function lookup.
-- `lab09-x86-calling-convention`: connect 32-bit x86 arguments, `esp`, `ebp`, `eip`, and `eax`.
-- `lab10-c-and-asm`: debug a C call into assembly and identify a callee-saved register violation.
+- `lab09-riscv-calling-convention`: connect RV32 arguments, `a0/a1/a2`, `ra`, `sp`, `s0/fp`, `pc`, and return values.
+- `lab10-c-and-asm`: debug a C call into RISC-V assembly and identify a callee-saved register violation.
 
 ## Required Packages
 
-Week 3 uses the base tools from Week 1-2 plus 32-bit compilation support:
+Week 3 uses the base tools from Week 1-2 plus the RISC-V cross compiler and binutils:
 
 ```bash
-sudo apt install build-essential gdb make binutils gcc-multilib libc6-dev-i386
+sudo apt install build-essential gdb make binutils gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
 ```
 
-If `gcc -m32` fails, install the 32-bit packages above before starting Lab 09 or Lab 10.
+Lab09 and Lab10 build RV32 object and disassembly artifacts. They do not use QEMU yet. QEMU and GDB remote debugging start in Week 4.
+
+```text
+build/*.o
+build/*.s
+build/*.dump
+```
 
 ## Build Check
 
@@ -47,20 +53,18 @@ objdump -t build/*.o
 readelf -s build/*.o
 ```
 
-For 32-bit stack/register inspection:
+For RV32 calling-convention inspection:
 
-```gdb
-disassemble
-info registers
-x/16xw $esp
-x/i $eip
+```bash
+riscv64-unknown-elf-objdump -dr build/*.o
+riscv64-unknown-elf-nm build/*.o
+riscv64-unknown-elf-readelf -s build/*.o
 ```
 
 For C/assembly boundaries:
 
-```gdb
-break assembly_function
-stepi
-info registers
-x/16xw $esp
+```bash
+riscv64-unknown-elf-nm build/main.o build/asm_helpers.o
+riscv64-unknown-elf-objdump -dr build/asm_helpers.o
+less build/lab10.combined.dump
 ```

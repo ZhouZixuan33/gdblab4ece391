@@ -8,7 +8,7 @@ The goal is not to memorize GDB commands in isolation. Each lab gives you a smal
 
 - Week 1: GDB basics in user-space C programs.
 - Week 2: memory, stack, pointers, and core dumps.
-- Week 3: Makefiles, symbols, 32-bit x86, and assembly view.
+- Week 3: Makefiles, symbols, RISC-V 32 calling convention, and assembly view.
 - Week 4: QEMU and GDB remote debugging.
 
 ## How to Start
@@ -20,16 +20,16 @@ sudo apt update
 sudo apt install build-essential gdb make binutils
 ```
 
-For Week 3 32-bit labs, also install:
+For Week 3 RISC-V calling-convention labs, also install:
 
 ```bash
-sudo apt install gcc-multilib libc6-dev-i386
+sudo apt install gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf
 ```
 
 For Week 4 QEMU remote-debug labs, also install:
 
 ```bash
-sudo apt install qemu-system-misc gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf gdb-multiarch
+sudo apt install qemu-system-misc gdb-multiarch
 ```
 
 Then start with:
@@ -80,7 +80,7 @@ CFLAGS := -g -O0 -Wall -Wextra -std=c11
 
 For debugging, the most important pair is `-g -O0`: give GDB useful debug info and keep the generated code close to the source you are reading.
 
-Week 3 32-bit labs add flags such as `-m32`, `-fno-omit-frame-pointer`, `-fno-pie`, and `-no-pie` so the stack frame and disassembly stay easier to read while learning x86 calling conventions.
+Week 3 RISC-V labs add target flags such as `-march=rv32im` and `-mabi=ilp32` so generated object files and disassembly match the RV32 calling-convention model used in the lab.
 
 Read each lab in this order:
 

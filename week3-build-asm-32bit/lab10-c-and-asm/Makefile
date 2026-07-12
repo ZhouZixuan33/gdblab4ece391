@@ -1,117 +1,72 @@
-CC := gcc
+CC := riscv64-unknown-elf-gcc
+OBJDUMP := riscv64-unknown-elf-objdump
+NM := riscv64-unknown-elf-nm
+READELF := riscv64-unknown-elf-readelf
 
-# COMMON_FLAGS are shared by both C compilation and assembly compilation.
+# Build 32-bit RISC-V object files for static inspection.
+ARCH_FLAGS := -march=rv32im -mabi=ilp32
+
+# Common flags used for C and assembly.
 #
-# Flag notes:
-# -m32
-#   Build 32-bit x86 code instead of the host machine's default 64-bit code.
-#   This lab studies 32-bit registers such as eax, ebx, ecx, edx, esp, and ebp.
+# -march=rv32im
+#   Generate 32-bit RISC-V code with the base integer ISA plus multiply/divide.
+#
+# -mabi=ilp32
+#   Use the 32-bit RISC-V integer ABI: int, long, and pointer are 32 bits.
 #
 # -g
-#   Include debugging information so GDB can show source lines, function names,
-#   variables, and useful symbols.
+#   Include debugging information for objdump/readelf/GDB later.
 #
 # -O0
-#   Turn off optimization. This keeps the generated code closer to the source
-#   code and makes instruction-by-instruction debugging easier for beginners.
+#   Keep generated code close to source code for instruction-level reading.
 #
 # -fno-omit-frame-pointer
-#   Keep ebp as a frame pointer. This makes stack frames easier to inspect in
-#   GDB because arguments and local variables have stable offsets from ebp.
-#
-# -fno-pie
-#   During compilation, do not generate position-independent executable code.
-#   This keeps addresses and disassembly simpler for this lab.
-#
-# Expanded value:
-# -m32 -g -O0 -fno-omit-frame-pointer -fno-pie
-COMMON_FLAGS := -m32 -g -O0 -fno-omit-frame-pointer -fno-pie
+#   Keep the frame pointer register easier to inspect in generated assembly.
+COMMON_FLAGS := $(ARCH_FLAGS) -g -O0 -fno-omit-frame-pointer
 
-# CFLAGS are used when compiling main.c into build/main.o.
-#
-# Extra C-only warning and language flags:
-# -Wall
-#   Enable a useful baseline set of compiler warnings.
-#
-# -Wextra
-#   Enable additional warnings beyond -Wall.
-#
-# -std=c11
-#   Compile the C file using the C11 language standard.
-#
-# Expanded value:
-# -m32 -g -O0 -fno-omit-frame-pointer -fno-pie -Wall -Wextra -std=c11
 CFLAGS := $(COMMON_FLAGS) -Wall -Wextra -std=c11
-
-# ASFLAGS are used when compiling asm_helpers.S into build/asm_helpers.o.
-# Expanded value:
-# -m32 -g -O0 -fno-omit-frame-pointer -fno-pie
 ASFLAGS := $(COMMON_FLAGS)
-
-# LDFLAGS are used when linking object files into the final executable.
-#
-# Linker flag notes:
-# -m32
-#   Link a 32-bit executable. This must match the 32-bit object files produced
-#   during compilation.
-#
-# -no-pie
-#   During linking, produce a non-PIE executable. This pairs with -fno-pie and
-#   keeps addresses easier to understand in GDB.
-#
-# Expanded value:
-# -m32 -no-pie
-LDFLAGS := -m32 -no-pie
+LDFLAGS := $(ARCH_FLAGS) -r
 
 BUILD_DIR := build
-TARGET := $(BUILD_DIR)/lab10
-OBJS := $(BUILD_DIR)/main.o $(BUILD_DIR)/asm_helpers.o
+MAIN_OBJ := build/main.o
+ASM_OBJ := build/asm_helpers.o
+COMBINED_OBJ := build/lab10.combined.o
+MAIN_ASM := build/main.s
+ASM_DUMP := build/asm_helpers.dump
+COMBINED_DUMP := build/lab10.combined.dump
 
-.PHONY: all run clean
+.PHONY: all inspect clean
 
-all: $(TARGET)
+all: $(MAIN_OBJ) $(ASM_OBJ) $(COMBINED_OBJ) $(MAIN_ASM) $(ASM_DUMP) $(COMBINED_DUMP)
 
-# Build the final executable from both object files.
-#
-# Fully expanded command:
-# gcc -m32 -no-pie build/main.o build/asm_helpers.o -o build/lab10
-#
-# The part after "|" means build/ must exist before linking, but changing the
-# timestamp of build/ alone should not force relinking.
-$(TARGET): $(OBJS) | $(BUILD_DIR)
-	$(CC) $(LDFLAGS) $(OBJS) -o $(TARGET)
+# Combine object files without producing a runnable program.
+# This lets students inspect how the C object refers to the assembly symbol.
+$(COMBINED_OBJ): $(MAIN_OBJ) $(ASM_OBJ)
+	$(CC) $(LDFLAGS) build/main.o build/asm_helpers.o -o build/lab10.combined.o
 
-# Compile the C source file into an object file.
-#
-# Fully expanded command:
-# gcc -m32 -g -O0 -fno-omit-frame-pointer -fno-pie -Wall -Wextra -std=c11 -c main.c -o build/main.o
-$(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c main.c -o $(BUILD_DIR)/main.o
+$(MAIN_OBJ): main.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c main.c -o build/main.o
 
-# Compile the assembly source file into an object file.
-#
-# Fully expanded command:
-# gcc -m32 -g -O0 -fno-omit-frame-pointer -fno-pie -c asm_helpers.S -o build/asm_helpers.o
-$(BUILD_DIR)/asm_helpers.o: asm_helpers.S | $(BUILD_DIR)
-	$(CC) $(ASFLAGS) -c asm_helpers.S -o $(BUILD_DIR)/asm_helpers.o
+$(ASM_OBJ): asm_helpers.S | $(BUILD_DIR)
+	$(CC) $(ASFLAGS) -c asm_helpers.S -o build/asm_helpers.o
 
-# Create the build directory if it does not already exist.
-#
-# Fully expanded command:
-# mkdir -p build
+$(MAIN_ASM): main.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -S main.c -o build/main.s
+
+$(ASM_DUMP): $(ASM_OBJ)
+	$(OBJDUMP) -dr build/asm_helpers.o > build/asm_helpers.dump
+
+$(COMBINED_DUMP): $(COMBINED_OBJ)
+	$(OBJDUMP) -dr build/lab10.combined.o > build/lab10.combined.dump
+
 $(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+	mkdir -p build
 
-# Build the executable first, then run it.
-#
-# Fully expanded command:
-# ./build/lab10
-run: $(TARGET)
-	./$(TARGET)
+inspect: all
+	$(NM) build/main.o build/asm_helpers.o build/lab10.combined.o
+	$(READELF) -s build/lab10.combined.o
+	$(OBJDUMP) -dr build/lab10.combined.o
 
-# Remove generated files.
-#
-# Fully expanded command:
-# rm -rf build
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf build
