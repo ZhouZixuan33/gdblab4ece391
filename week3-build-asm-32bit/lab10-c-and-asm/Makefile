@@ -3,16 +3,16 @@ OBJDUMP := riscv64-unknown-elf-objdump
 NM := riscv64-unknown-elf-nm
 READELF := riscv64-unknown-elf-readelf
 
-# Build 32-bit RISC-V object files for static inspection.
-ARCH_FLAGS := -march=rv32im -mabi=ilp32
+# Build 64-bit RISC-V object files for static inspection.
+ARCH_FLAGS := -march=rv64im -mabi=lp64
 
 # Common flags used for C and assembly.
 #
-# -march=rv32im
-#   Generate 32-bit RISC-V code with the base integer ISA plus multiply/divide.
+# -march=rv64im
+#   Generate 64-bit RISC-V code with the base integer ISA plus multiply/divide.
 #
-# -mabi=ilp32
-#   Use the 32-bit RISC-V integer ABI: int, long, and pointer are 32 bits.
+# -mabi=lp64
+#   Use the 64-bit RISC-V integer ABI: long and pointer are 64 bits; int is 32 bits.
 #
 # -g
 #   Include debugging information for objdump/readelf/GDB later.
@@ -65,6 +65,7 @@ $(BUILD_DIR):
 
 inspect: all
 	$(NM) build/main.o build/asm_helpers.o build/lab10.combined.o
+	$(READELF) -h build/lab10.combined.o
 	$(READELF) -s build/lab10.combined.o
 	$(OBJDUMP) -dr build/lab10.combined.o
 
