@@ -437,35 +437,6 @@ In this lab, the roles are:
 
 This is why a broken assembly function can corrupt a C program. The C compiler may keep a C variable in `s1` because the ABI promises that a callee will preserve it. If hand-written assembly changes `s1` without restoring it, that C variable can silently change even though the C source code never assigned a new value to it.
 
-### What Is a `.S` File? / `.S` 文件是什么
-
-Lab 10 has two source files:
-
-```text
-main.c         C source file
-asm_helpers.S RISC-V assembly helper functions
-```
-
-The uppercase `.S` extension means assembly source code that is processed by the C preprocessor before it is assembled.
-
-Difference:
-
-```text
-.s   ordinary assembly source, usually sent directly to the assembler
-.S   preprocessed assembly source, then assembled
-```
-
-This is useful in kernel-style code because assembly files often need constants, macros, or offsets shared with C code.
-
-Build flow:
-
-```text
-main.c         -> build/main.o
-asm_helpers.S -> build/asm_helpers.o
-main.o + asm_helpers.o -> build/lab10.combined.o
-```
-
-The combined object is not a runnable program. It is a convenient artifact for symbol and disassembly inspection.
 
 ### Compile and Link / 编译和链接
 

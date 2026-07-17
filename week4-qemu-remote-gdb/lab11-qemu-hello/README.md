@@ -13,6 +13,7 @@ By the end of this lab, you should be able to answer:
 - What does `target remote :1234` do?
 - Why do we use `gdb-multiarch`?
 - What are `pc`, `sp`, `ra`, and `a0`?
+- How do `.S` files relate to assembly in ECE391-style code?
 
 This lab is not a bug hunt. It is the conceptual base for the rest of Week 4.
 
@@ -66,6 +67,7 @@ Meaning:
 Run:
 
 ```bash
+make
 make artifacts
 ```
 
@@ -148,6 +150,8 @@ Mechanically, follow the course skeleton.
 
 ECE391 may provide its own Makefile, linker script, QEMU command, kernel layout, device setup, and helper targets. You should not invent your own QEMU command if the course already gives one.
 
+This lab uses a 64-bit RISC-V target because its local Makefile uses `qemu-system-riscv64`, `riscv64-unknown-elf-*`, `-march=rv64imac`, and GDB architecture `riscv:rv64`. Do not infer from this lab alone that ECE391 must always use 64-bit RISC-V. In the course code, confirm the target width from the provided Makefile and setup scripts.
+
 For ECE391 preparation, you need to understand:
 
 - QEMU runs a virtual machine target.
@@ -219,6 +223,37 @@ GDB can use ELF symbols.
 QEMU can load this RISC-V ELF with -kernel.
 ```
 
+## What Is `.S`?
+
+ECE391-style low-level code uses assembly, but the file extension and assembler matter.
+
+This lab uses:
+
+```text
+start.S
+```
+
+Uppercase `.S` usually means assembly source that is passed through the C preprocessor before assembly. It is commonly built through GCC:
+
+```bash
+riscv64-unknown-elf-gcc -c start.S -o build/start.o
+```
+
+That matters because `.S` files can use preprocessor features:
+
+```asm
+#include "some_header.h"
+#define SOME_CONSTANT 123
+```
+
+This is common in OS skeleton code where C and assembly need shared constants.
+
+The pipeline is:
+
+```text
+assembly source -> object file -> linked ELF/kernel target -> QEMU -> GDB
+```
+
 ## What Is QEMU Doing?
 
 QEMU is emulating a RISC-V machine:
@@ -231,7 +266,7 @@ virtual interrupt controller/device model
 GDB remote debugging stub
 ```
 
-The course note you quoted mentions RISC-V manuals, PLIC specs, and VirtIO specs. Those are not "asm syntax manuals." They describe the machine and devices your OS code talks to:
+The course note you quoted mentions RISC-V manuals, PLIC specs, and VirtIO specs. Those are not assembly syntax manuals. They describe the machine and devices your OS code talks to:
 
 ```text
 RISC-V instruction set manual:
@@ -280,8 +315,10 @@ target remote :1234
 Meaning:
 
 - `gdb-multiarch build/kernel.elf`: start GDB and load symbols from the ELF.
-- `set architecture riscv:rv64`: tell GDB the target is 64-bit RISC-V.
+- `set architecture riscv:rv64`: tell GDB this lab's target is 64-bit RISC-V.
 - `target remote :1234`: connect to QEMU's GDB remote stub.
+
+In ECE391, use the architecture and GDB setup from the course skeleton. If the course target is different, this line changes with it.
 
 Now GDB can:
 
@@ -321,6 +358,21 @@ make check-tools
 
 What to look for: `riscv64-unknown-elf-gcc`, RISC-V binutils, `qemu-system-riscv64`, and GDB should be available.
 
+If the check reports missing tools on Ubuntu or WSL, install the Week 4 toolchain:
+
+```bash
+sudo apt update
+sudo apt install qemu-system-misc gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf gdb-multiarch make
+```
+
+Then rerun:
+
+```bash
+make check-tools
+```
+
+If you are using a course VM or container, prefer the course setup instructions if they differ. The package names above show the capabilities this lab expects: RISC-V cross compiler, RISC-V binutils, QEMU, GDB, and Make.
+
 Step 2: Build the artifacts.
 
 ```bash
@@ -348,12 +400,43 @@ Step 4: Run the target normally with QEMU.
 qemu-system-riscv64 -machine virt -nographic -bios none -kernel build/kernel.elf
 ```
 
+Read the command left to right:
+
+```text
+qemu-system-riscv64
+  Start QEMU's full-system emulator for a 64-bit RISC-V machine.
+  This creates a virtual machine target; it does not run kernel.elf as a
+  normal program on your host OS.
+
+-machine virt
+  Use QEMU's generic RISC-V virtual board. This board gives the target
+  a CPU, RAM, and memory-mapped devices. The UART address used by this
+  lab belongs to this virtual board.
+
+-nographic
+  Do not open a separate graphical QEMU window. Connect the virtual
+  serial console to this terminal instead. That is why UART output
+  appears in the terminal where you started QEMU.
+
+-bios none
+  Do not start a firmware image first. For this lab, QEMU loads the
+  kernel target directly.
+
+-kernel build/kernel.elf
+  Load this ELF file into the virtual machine. The ELF header and linker
+  script tell QEMU where the target code lives and where execution starts.
+```
+
+This is a normal run, so there is no GDB connection yet. The virtual CPU starts immediately. Step 5 adds `-s -S` when you want QEMU to wait for GDB.
+
 What to look for: serial output should include:
 
 ```text
 Lab 11 kernel_entry reached
 Lab 11 hello_checkpoint reached
 ```
+
+After the messages print, the target waits in `halt_loop`. To quit QEMU in `-nographic` mode, press `Ctrl-a`, then `x`.
 
 After you understand the QEMU command, you can use:
 
@@ -468,6 +551,10 @@ What to look for: QEMU prints the Lab 11 messages, then the CPU waits in `halt_l
 
    Answer: the target is RISC-V, and `gdb-multiarch` is the safer default for cross-architecture remote debugging.
 
-10. What ELF knowledge matters most for this lab?
+10. What is `.S`?
+
+    Answer: assembly source that is usually passed through the C preprocessor and assembled through GCC.
+
+11. What ELF knowledge matters most for this lab?
 
     Answer: know that ELF is structured and symbol-rich, and tools such as GDB, `nm`, `readelf`, and `objdump` can use it to map addresses to names and instructions.
