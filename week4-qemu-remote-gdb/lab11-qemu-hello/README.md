@@ -1,45 +1,65 @@
-# Lab 11: RISC-V QEMU, ELF Symbols, and First Remote GDB Session
+# Lab 11: Runtime RISC-V Registers with QEMU and GDB
 
 ## Goal
 
-Build the mental model for ECE391-style QEMU/GDB debugging on a RISC-V target.
+Lab 10 taught the RV64 calling convention by looking at object files, symbols, and disassembly. Lab 11 uses the same kind of C/assembly example, but now it runs inside QEMU so you can inspect the live CPU state with GDB.
 
 By the end of this lab, you should be able to answer:
 
 - What files does `make` build?
-- What is an ELF file?
-- What does QEMU run?
+- What is an ELF target?
+- What does QEMU load?
 - What does GDB read for symbols?
 - What does `target remote :1234` do?
 - Why do we use `gdb-multiarch`?
-- What are `pc`, `sp`, `ra`, and `a0`?
-- How do `.S` files relate to assembly in ECE391-style code?
-
-This lab is not a bug hunt. It is the conceptual base for the rest of Week 4.
+- What are `pc`, `sp`, `ra`, `a0`, `a1`, `a2`, and `s1` doing at runtime?
+- How does a `.S` file fit into a QEMU-loadable target?
 
 The main sentence to remember:
 
 ```text
-QEMU runs the RISC-V target. GDB reads the ELF symbols.
+QEMU loads and runs build/kernel.elf. GDB reads symbols from build/kernel.elf and inspects the live registers.
 ```
 
-In this lab, both of those point at the same file:
+In this lab, the "RV64 target" means this artifact:
 
 ```text
 build/kernel.elf
 ```
 
+QEMU uses it as the program loaded into the virtual machine. GDB uses the same file as the symbol file, so addresses can show up as names such as `_start`, `kernel_entry`, and `asm_add_three`.
+
 ## Big Picture
 
-In a normal user-space GDB session, you might run:
+Lab 10 was static:
 
-```bash
-gdb ./build/program
+```text
+main.c + asm_helpers.S -> object files -> nm/objdump/readelf
 ```
 
-GDB starts that Linux process itself.
+Lab 11 is runtime:
 
-In this QEMU session, the pieces are different:
+```text
+start.S + main.c + asm_helpers.S -> kernel.elf -> QEMU -> GDB
+```
+
+The target code does three useful things:
+
+```text
+_start
+  sets sp
+  calls kernel_entry
+
+kernel_entry in main.c
+  calls asm_add_three(100, 20, 1)
+  calls check_preserves_s1()
+
+asm_helpers.S
+  puts arguments and return values in real RV64 registers
+  intentionally lets broken_helper clobber s1
+```
+
+The QEMU/GDB relationship is:
 
 ```text
                 reads symbols
@@ -47,20 +67,14 @@ GDB  ------------------------------>  build/kernel.elf
  |
  | remote protocol on :1234
  v
-QEMU GDB stub  ---- controls ---->  virtual RISC-V CPU
+QEMU GDB stub  ---- controls ---->  virtual RV64 CPU
  |
  | loads with -kernel
  v
 build/kernel.elf
 ```
 
-Meaning:
-
-- QEMU emulates a RISC-V `virt` machine.
-- QEMU loads `build/kernel.elf` with `-kernel`.
-- GDB also opens `build/kernel.elf` so names like `_start` and `kernel_entry` make sense.
-- GDB connects to QEMU through TCP port `1234`.
-- GDB does not run the kernel as a normal Linux process.
+GDB does not run the target as a normal Linux process. QEMU owns the virtual CPU; GDB connects to QEMU and controls that CPU remotely.
 
 ## What Does `make` Build?
 
@@ -75,70 +89,154 @@ The build pipeline is:
 
 ```text
 start.S       -> start.o
-start.o
-+ linker.ld   -> kernel.elf
-kernel.elf    -> kernel.bin
+main.c        -> main.o
+asm_helpers.S -> asm_helpers.o
+
+start.o + main.o + asm_helpers.o + linker.ld
+             -> kernel.elf
 ```
 
 The important artifacts are:
 
 ```text
 build/start.o
-  RISC-V object file assembled from start.S.
+  Tiny entry object. It sets sp, calls kernel_entry, then waits in halt_loop.
+
+build/main.o
+  C runtime driver. It calls the assembly helpers and stores observable globals.
+
+build/asm_helpers.o
+  Hand-written RV64 assembly helpers from the Lab 10 concept.
 
 build/kernel.elf
-  Linked RISC-V ELF with symbols. QEMU loads this and GDB reads this.
-
-build/kernel.bin
-  Flat bytes extracted from kernel.elf for comparison. Lab 11 does not boot this file.
+  Linked RV64 ELF with symbols. QEMU loads this and GDB reads this.
 ```
 
-`start.S` is the small RISC-V assembly source for this lab. The Makefile turns it into an object file, then links it into `kernel.elf`.
+### What Is the Difference Between `.o` and `.elf`?
 
-For RISC-V QEMU `virt`, using `-kernel build/kernel.elf` is the clean mental model students need: there is a target ELF, QEMU loads it, and GDB uses its symbols.
+An `.o` file is an object file: a build-time piece of the final target.
 
-## What Is a Bootable Target?
-
-In this lab, "bootable target" does not mean a hand-made disk image with a BIOS boot sector.
-
-It means:
+In this lab:
 
 ```text
-an artifact QEMU knows how to load and start
+main.c        -> build/main.o
+asm_helpers.S -> build/asm_helpers.o
+start.S       -> build/start.o
 ```
 
-Here, that artifact is:
+Each `.o` file may contain code, data, symbols, debug information, and unresolved references to names defined in other files. For example, `main.o` can refer to `asm_add_three`, while `asm_helpers.o` defines `asm_add_three`.
+
+The `.elf` file is the linked target:
 
 ```text
-build/kernel.elf
+start.o + main.o + asm_helpers.o + linker.ld -> build/kernel.elf
 ```
 
-QEMU starts it with:
+The linker combines the object files, resolves symbol references, and uses `linker.ld` to choose the target addresses. In Lab 11, `build/kernel.elf` is the file QEMU loads and the file GDB reads for symbols.
 
-```bash
-qemu-system-riscv64 -machine virt -nographic -bios none -kernel build/kernel.elf
-```
-
-Option meanings:
+Short version:
 
 ```text
-qemu-system-riscv64
-  Emulate a 64-bit RISC-V machine.
-
--machine virt
-  Use QEMU's generic RISC-V virtual board.
-
--nographic
-  Use the terminal for serial I/O instead of opening a GUI window.
-
--bios none
-  Do not boot through a firmware image; start the kernel target directly.
-
--kernel build/kernel.elf
-  Load this ELF as the target program.
+.o files are parts.
+build/kernel.elf is the assembled target.
 ```
 
-### Is This Like ECE391?
+### What Does `linker.ld` Do?
+
+`linker.ld` is the linker script. It is not code that the CPU executes. It is a layout recipe that tells the linker how to arrange the final `build/kernel.elf`.
+
+The whole file is:
+
+```ld
+OUTPUT_ARCH(riscv)
+ENTRY(_start)
+
+SECTIONS
+{
+  . = 0x80000000;
+
+  .text : {
+    KEEP(*(.text.start))
+    *(.text*)
+  }
+
+  .rodata : {
+    *(.srodata*)
+    *(.rodata*)
+  }
+
+  .data : {
+    *(.sdata*)
+    *(.data*)
+  }
+
+  .bss : {
+    *(.sbss*)
+    *(.bss*)
+    *(COMMON)
+    . = ALIGN(16);
+  }
+}
+```
+
+Read it as:
+
+```text
+OUTPUT_ARCH(riscv)
+  The output file is for RISC-V.
+
+ENTRY(_start)
+  The ELF entry symbol is _start. QEMU begins from this entry point.
+
+SECTIONS { ... }
+  This block describes where the final ELF sections go.
+
+. = 0x80000000;
+  Set the current output address to 0x80000000. For this QEMU virt target,
+  the lab places the first instruction there.
+
+.text
+  Code section. The linker puts executable instructions here.
+
+KEEP(*(.text.start))
+  Keep the startup code section even if linker garbage collection is enabled.
+  This makes sure _start stays at the front of the code layout.
+
+*(.text*)
+  Collect all input code sections named .text, .text.foo, and similar from
+  start.o, main.o, and asm_helpers.o.
+
+.rodata
+  Read-only data section. String literals such as UART messages usually live here.
+
+*(.srodata*) and *(.rodata*)
+  Collect small read-only data and regular read-only data from the object files.
+
+.data
+  Initialized writable global data.
+
+*(.sdata*) and *(.data*)
+  Collect small data and regular initialized data.
+
+.bss
+  Zero-initialized or uninitialized global storage. The stack buffer in start.S
+  and globals initialized to zero can live here.
+
+*(.sbss*), *(.bss*), and *(COMMON)
+  Collect common forms of zero-initialized storage.
+
+. = ALIGN(16);
+  Move the end of .bss up to a 16-byte boundary. This keeps the final layout
+  neatly aligned for RV64 stack/data expectations.
+```
+
+Short version:
+
+```text
+linker.ld decides where code and data live in build/kernel.elf.
+```
+
+## Is This Like ECE391?
 
 Conceptually, yes:
 
@@ -148,18 +246,9 @@ build target -> run under QEMU -> attach GDB -> inspect CPU state
 
 Mechanically, follow the course skeleton.
 
-ECE391 may provide its own Makefile, linker script, QEMU command, kernel layout, device setup, and helper targets. You should not invent your own QEMU command if the course already gives one.
+ECE391 may provide its own Makefile, linker script, QEMU command, kernel layout, device setup, and helper targets. Use the course commands when you are working in the course tree.
 
-This lab uses a 64-bit RISC-V target because its local Makefile uses `qemu-system-riscv64`, `riscv64-unknown-elf-*`, `-march=rv64imac`, and GDB architecture `riscv:rv64`. Do not infer from this lab alone that ECE391 must always use 64-bit RISC-V. In the course code, confirm the target width from the provided Makefile and setup scripts.
-
-For ECE391 preparation, you need to understand:
-
-- QEMU runs a virtual machine target.
-- The target has an entry point.
-- GDB needs symbols to map addresses to names.
-- The current instruction address is in `pc`.
-- The stack pointer is `sp`.
-- If there is no output, inspect registers and current instruction before guessing.
+This lab uses RV64 because Lab 10 is teaching the RV64 calling convention and we want a direct runtime continuation. In a real course tree, confirm the target width from the provided Makefile and setup scripts. The key transferable ideas are the register roles, symbol lookup, QEMU/GDB connection, and habit of inspecting `pc`, `sp`, `ra`, and argument registers before guessing.
 
 ## What Is ELF?
 
@@ -176,11 +265,6 @@ debug information
 entry point metadata
 ```
 
-Use:
-
-```bash
-make inspect
-```
 
 Or manually:
 
@@ -195,63 +279,41 @@ What to notice:
 
 - `file` identifies `kernel.elf` as a RISC-V ELF.
 - `readelf -h` shows the ELF header and entry point.
-- `nm -n` shows symbol names and addresses.
-- `objdump -d` shows RISC-V instructions under symbols such as `_start` and `kernel_entry`.
+- `nm -n` shows symbols such as `_start`, `kernel_entry`, `asm_add_three`, `broken_helper`, and `halt_loop`.
+- `objdump -d` shows the instructions GDB can step through at runtime.
 
-### Does ECE391 Use ELF?
-
-Yes, ELF is part of the systems-programming world around kernels, loaders, and debuggers.
-
-For debugging:
+For this lab:
 
 ```text
-GDB often needs a symbol-bearing ELF to turn addresses into names.
+QEMU loads the ELF.
+GDB reads the ELF symbols.
+Your breakpoints use names from the ELF symbol table.
 ```
 
-For program loading:
+## What Is `start.S`?
 
-```text
-Course code may discuss executable headers, magic numbers, entry points,
-and loading program segments.
-```
-
-You do not need a full ELF loader for Lab 11. You need to know:
-
-```text
-ELF is structured and symbol-rich.
-GDB can use ELF symbols.
-QEMU can load this RISC-V ELF with -kernel.
-```
-
-## What Is `.S`?
-
-ECE391-style low-level code uses assembly, but the file extension and assembler matter.
-
-This lab uses:
+This lab has two `.S` files:
 
 ```text
 start.S
+asm_helpers.S
 ```
 
 Uppercase `.S` usually means assembly source that is passed through the C preprocessor before assembly. It is commonly built through GCC:
 
 ```bash
 riscv64-unknown-elf-gcc -c start.S -o build/start.o
+riscv64-unknown-elf-gcc -c asm_helpers.S -o build/asm_helpers.o
 ```
 
-That matters because `.S` files can use preprocessor features:
+That matters in OS-style code because assembly files often need constants or macros shared with C.
 
-```asm
-#include "some_header.h"
-#define SOME_CONSTANT 123
-```
-
-This is common in OS skeleton code where C and assembly need shared constants.
-
-The pipeline is:
+In this lab:
 
 ```text
-assembly source -> object file -> linked ELF/kernel target -> QEMU -> GDB
+start.S       provides the entry point and stack setup
+asm_helpers.S provides the RV64 calling-convention helper functions
+main.c        calls those helper functions at runtime
 ```
 
 ## What Is QEMU Doing?
@@ -279,7 +341,7 @@ VirtIO specification:
   virtual device interface used by emulators such as QEMU
 ```
 
-Lab 11 only touches the first layer: CPU instructions, registers, ELF symbols, and QEMU/GDB connection. Later labs can build toward traps, interrupts, and device debugging.
+Lab 11 only touches the first layer: CPU instructions, registers, ELF symbols, UART output, and the QEMU/GDB connection.
 
 ## What Is GDB Doing?
 
@@ -315,30 +377,20 @@ target remote :1234
 Meaning:
 
 - `gdb-multiarch build/kernel.elf`: start GDB and load symbols from the ELF.
-- `set architecture riscv:rv64`: tell GDB this lab's target is 64-bit RISC-V.
+- `set architecture riscv:rv64`: tell GDB this lab's target is RV64.
 - `target remote :1234`: connect to QEMU's GDB remote stub.
-
-In ECE391, use the architecture and GDB setup from the course skeleton. If the course target is different, this line changes with it.
 
 Now GDB can:
 
-- read symbols from `kernel.elf`
-- pause and continue the virtual CPU
-- inspect registers such as `pc`, `sp`, `ra`, and `a0`
-- set breakpoints such as `break kernel_entry`
-- examine machine instructions with `x/i $pc`
-
-The Makefile has a convenience target:
-
-```bash
-make gdb
-```
-
-Use it after you understand the manual commands. ECE391-style course Makefiles may not provide an equivalent helper.
+- inspect live registers such as `pc`, `sp`, `ra`, `a0`, `a1`, `a2`, and `s1`
+- stop at C symbols such as `kernel_entry`
+- stop at assembly symbols such as `asm_add_three` and `broken_helper`
+- step one machine instruction at a time with `si`
+- compare runtime register state with the static Lab 10 disassembly
 
 ### Why `gdb-multiarch` Instead of `gdb`?
 
-Your development machine and this lab's target may use different CPU architectures. The target here is a freestanding RISC-V machine inside QEMU.
+Your development machine and this lab's target may use different CPU architectures. The target here is a freestanding RV64 machine inside QEMU.
 
 `gdb-multiarch` is a safer default because it supports multiple CPU architectures and remote targets.
 
@@ -371,18 +423,18 @@ Then rerun:
 make check-tools
 ```
 
-If you are using a course VM or container, prefer the course setup instructions if they differ. The package names above show the capabilities this lab expects: RISC-V cross compiler, RISC-V binutils, QEMU, GDB, and Make.
+If you are using a course VM or container, prefer the course setup instructions if they differ.
 
-Step 2: Build the artifacts.
+Step 2: Build the runtime target.
 
 ```bash
 make
 make artifacts
 ```
 
-What to look for: the artifact map should show that `kernel.elf` is the key file for both QEMU and GDB.
+What to look for: the artifact map should show `start.S`, `main.c`, and `asm_helpers.S` all becoming part of `build/kernel.elf`.
 
-Step 3: Inspect the ELF.
+Step 3: Inspect the ELF before running it.
 
 ```bash
 make inspect
@@ -391,8 +443,25 @@ make inspect
 What to look for:
 
 - `kernel.elf` is a RISC-V ELF file.
-- `_start`, `kernel_entry`, and `hello_checkpoint` appear in the symbol table.
-- `objdump` shows RISC-V instructions.
+- `_start`, `kernel_entry`, `asm_add_three`, `check_preserves_s1`, `broken_helper`, and `halt_loop` appear in the symbol table.
+- `objdump` shows instructions from both sources:
+
+  ```text
+  kernel_entry
+    compiled by GCC from main.c
+
+  asm_add_three
+  check_preserves_s1
+  broken_helper
+    assembled from asm_helpers.S
+  ```
+
+If you run a full disassembly yourself, the helper functions may not appear in the first screen of output. Search for their names or disassemble one symbol directly:
+
+```bash
+riscv64-unknown-elf-objdump -d build/kernel.elf --disassemble=asm_add_three
+riscv64-unknown-elf-objdump -d build/kernel.elf --disassemble=broken_helper
+```
 
 Step 4: Run the target normally with QEMU.
 
@@ -427,13 +496,15 @@ qemu-system-riscv64
   script tell QEMU where the target code lives and where execution starts.
 ```
 
-This is a normal run, so there is no GDB connection yet. The virtual CPU starts immediately. Step 5 adds `-s -S` when you want QEMU to wait for GDB.
+This is a normal run, so there is no GDB connection yet. The virtual CPU starts immediately.
 
 What to look for: serial output should include:
 
 ```text
-Lab 11 kernel_entry reached
-Lab 11 hello_checkpoint reached
+Lab 11 runtime target reached
+asm_add_three returned 121
+check_preserves_s1 detected clobbered s1
+Lab 11 done; CPU will wait in halt_loop
 ```
 
 After the messages print, the target waits in `halt_loop`. To quit QEMU in `-nographic` mode, press `Ctrl-a`, then `x`.
@@ -471,37 +542,137 @@ set architecture riscv:rv64
 target remote :1234
 ```
 
-Step 7: Inspect where the virtual CPU is.
+Step 7: Inspect the first CPU state.
 
 ```gdb
-info registers
+info registers pc sp ra
 x/i $pc
 ```
 
-What to look for: `pc` is the program counter, the RISC-V current-instruction address.
+What to look for:
 
-Step 8: Break at the target entry points.
+- `pc` is the current instruction address.
+- Immediately after connecting, the CPU is paused at the beginning of the target, so `sp` may not be interesting yet.
+- After `_start` runs, `sp` points at the stack region defined in `start.S`.
+- `ra` changes when one function calls another.
+
+Step 8: Watch C pass arguments into assembly.
 
 ```gdb
-break _start
-break kernel_entry
+break asm_add_three
+continue
+info registers a0 a1 a2 ra sp
+x/3i $pc
+```
+
+What to look for:
+
+```text
+a0 = 100
+a1 = 20
+a2 = 1
+```
+
+Those are the three C arguments from:
+
+```c
+asm_add_three(100, 20, 1)
+```
+
+Now step through the two add instructions:
+
+```gdb
+si
+info registers a0
+si
+info registers a0
+```
+
+What to look for:
+
+```text
+after first add:  a0 = 120
+after second add: a0 = 121
+```
+
+That is the runtime version of the static Lab 10 observation: arguments enter in `a0/a1/a2`, and the integer return value comes back in `a0`.
+
+Step 9: Connect the return value to C state.
+
+```gdb
+break runtime_after_add
+continue
+p g_add_result
+```
+
+What to look for:
+
+```text
+g_add_result = 121
+```
+
+This proves the value returned from assembly became a C global.
+
+Step 10: Watch the callee-saved register bug happen.
+
+```gdb
+break broken_helper
+break bad_preserve
+break runtime_after_preserve_check
 continue
 ```
 
-What to look for: GDB should stop when QEMU reaches these symbols.
-
-Step 9: Connect symbols to CPU state.
+At `broken_helper`, inspect `s1` before the bad instruction changes it:
 
 ```gdb
-info registers pc sp ra a0
+info registers s1 a0 ra sp
+x/3i $pc
+```
+
+What to look for:
+
+```text
+s1 = 0x39139139
+```
+
+Now execute one instruction:
+
+```gdb
+si
+info registers s1
+```
+
+What to look for:
+
+```text
+s1 = 0x0badc0de
+```
+
+That is the bug from Lab 10, but now you watched it happen on the live virtual CPU.
+
+Continue to the failure branch:
+
+```gdb
+continue
 x/i $pc
-break hello_checkpoint
-continue
 ```
 
-What to look for: the current `pc` should match code that GDB can describe with symbols from `kernel.elf`.
+What to look for: GDB stops at `bad_preserve`, proving `check_preserves_s1` noticed that `s1` did not survive the call.
 
-Step 10: Let the target finish.
+Continue to the C symbol `runtime_after_preserve_check`. This is a small marker function in `main.c` that gives GDB a clean place to stop after `g_check_result` has been written:
+
+```gdb
+continue
+p g_check_result
+```
+
+What to look for:
+
+```text
+g_check_result = 1
+```
+
+Step 11: Let the target finish.
 
 ```gdb
 continue
@@ -519,42 +690,38 @@ What to look for: QEMU prints the Lab 11 messages, then the CPU waits in `halt_l
 
    Answer: `build/kernel.elf`.
 
-3. What is the short memory sentence for QEMU and GDB?
-
-   Answer:
-
-   ```text
-   QEMU runs the RISC-V target. GDB reads the ELF symbols.
-   ```
-
-4. What does `target remote :1234` do?
+3. What does `target remote :1234` do?
 
    Answer: it connects GDB to QEMU's remote debugging stub on TCP port `1234`.
 
-5. What does QEMU's `-S` option do?
+4. What does QEMU's `-S` option do?
 
    Answer: it starts the virtual CPU paused.
 
-6. What does QEMU's `-s` option do?
+5. What does QEMU's `-s` option do?
 
    Answer: it opens the default GDB remote debugging port, `1234`.
 
-7. Which RISC-V register shows the current instruction address?
+6. Which registers carry `asm_add_three(100, 20, 1)` at runtime?
 
-   Answer: `pc`, the program counter.
+   Answer: `a0 = 100`, `a1 = 20`, and `a2 = 1`.
 
-8. Which RISC-V register is the stack pointer?
+7. Which register carries the integer return value from `asm_add_three`?
 
-   Answer: `sp`.
+   Answer: `a0`.
 
-9. Why does this lab recommend `gdb-multiarch` instead of plain `gdb`?
+8. Which register shows the current instruction address?
 
-   Answer: the target is RISC-V, and `gdb-multiarch` is the safer default for cross-architecture remote debugging.
+   Answer: `pc`.
+
+9. Why is changing `s1` inside `broken_helper` a bug?
+
+   Answer: `s1` is callee-saved, so a function that changes it must restore it before returning.
 
 10. What is `.S`?
 
     Answer: assembly source that is usually passed through the C preprocessor and assembled through GCC.
 
-11. What ELF knowledge matters most for this lab?
+11. What is the main Lab 10 to Lab 11 bridge?
 
-    Answer: know that ELF is structured and symbol-rich, and tools such as GDB, `nm`, `readelf`, and `objdump` can use it to map addresses to names and instructions.
+    Answer: Lab 10 inspects the calling convention statically; Lab 11 watches the same register rules happen at runtime in QEMU through GDB.
