@@ -95,9 +95,10 @@ GDB $pc     -> live execution reaches that address
 
 ## Retained Remote-Debugging Objectives
 
-The original Lab 12 failure scenario remains: UART messages alone show that
-something printed, but do not prove the precise instruction or function at
-which the CPU arrived. The learner must stop the target and collect evidence.
+The lab will use neutral guided-verification goals. UART messages show visible
+progress, while static ELF inspection and live GDB state provide stronger
+evidence about the precise instruction, function, address, and register state
+the CPU reached.
 
 The guided exercise will preserve this progression:
 
