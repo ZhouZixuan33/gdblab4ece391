@@ -70,6 +70,16 @@ execution environment and the CPU's current privilege state.
 
 ## Entry Address Evidence Chain
 
+Before tracing the entry address, the README will include an ASCII diagram
+that compares the ELF file with its loaded memory image. It will show the ELF
+header, program headers, loadable sections, non-loadable symbol/debug sections,
+and the resulting `.text`/`.rodata`/`.data`/`.bss` layout in RAM.
+
+The diagram and its notes will explicitly distinguish sections (linker and
+debugger organization) from segments (loader units), explain that `.bss`
+occupies memory without storing an equivalent block of zero bytes in the file,
+and keep UART MMIO at `0x10000000` outside the kernel ELF image.
+
 The code layout will make the following equality intentional and verifiable:
 
 ```text
