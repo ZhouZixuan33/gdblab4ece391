@@ -181,9 +181,9 @@ objective and checkpoint sequence are retained in the C implementation.
 
 The C source will use teaching-oriented block comments at conceptual
 boundaries. Comments will explain freestanding execution, MMIO, `volatile`,
-polling, observable GDB state, stable `noinline` breakpoints, and the
-`_start`-to-`kernel_entry`-to-`main` handoff. They will explain why the code is
-structured this way without restating obvious C syntax line by line.
+polling, observable GDB state, and the `_start`-to-`kernel_entry`-to-`main`
+handoff. They will explain why the code is structured this way without
+restating obvious C syntax line by line.
 
 Only the UART MMIO pointer will be `volatile`. Its Chinese comment will explain
 that device-register accesses must really reach the device and that `volatile`
@@ -198,6 +198,8 @@ compiler and linker flags remain in force.
 The Makefile will specify `-O0` explicitly. Disabling optimization is not a
 bare-metal requirement; it is a teaching choice that keeps function boundaries,
 variable locations, stepping, and GDB observations straightforward.
+The C source will therefore not add compiler-specific `noinline` attributes to
+the breakpoint functions.
 
 The README will explain that `-ffreestanding`, `-nostdlib`, and `-nostartfiles`
 remove the hosted assumptions that normally surround a C `main`. It will also
