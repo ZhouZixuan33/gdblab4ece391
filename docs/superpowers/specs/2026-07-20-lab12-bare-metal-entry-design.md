@@ -210,6 +210,12 @@ ready bit, and write characters to the transmit register. The README will
 explain why `printf` is unavailable, what MMIO and `volatile` mean, and why the
 implementation is polling rather than interrupt-driven.
 
+The UART introduction will include one compact NS16550A register map with only
+three columns: offset, common register name, and purpose. It will not expand
+baud-rate configuration details because they are not needed to read this
+polling example. The C comments will focus on UART, MMIO, and the two registers
+actually accessed: THR at offset 0 and LSR at offset 5.
+
 `init_console` is a named startup boundary and debugger checkpoint, not a full
 UART driver. The text will say that QEMU presents the UART in a state suitable
 for this minimal polling example. Register configuration, PLIC routing, UART
