@@ -298,6 +298,10 @@ and `ra` at meaningful stops.
 
 ## Documentation Guardrails
 
+README 的概念顺序先解释 `0x80000000` 的平台与链接来源，再展示最终
+`build/kernel.elf` 的内部结构。这样 ELF 图中出现的 entry、`_start` 和
+section 起始地址都有前文依据，而不是先展示尚未推导的结论。
+
 The revised lab must not say:
 
 - that all C code runs in U-mode;
