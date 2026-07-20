@@ -10,7 +10,7 @@ by this QEMU configuration, and trace the target from QEMU reset through
 
 ## Learning Outcomes
 
-After the lab, a learner should be able to explain:
+After the lab, a learner should be able to explain and demonstrate:
 
 1. Why a normal Linux C program usually runs in U-mode, while this lab runs in
    M-mode.
@@ -21,6 +21,17 @@ After the lab, a learner should be able to explain:
    different.
 6. What `_start`, `kernel_entry`, and `main` each contribute.
 7. How symbolic and raw-address breakpoints provide complementary evidence.
+8. Why QEMU loads `build/kernel.elf` while GDB reads the same ELF for symbols
+   and debug information, but GDB controls the live CPU through QEMU's remote
+   stub.
+9. How to configure RV64 in GDB, connect with `target remote :1234`, and verify
+   the loaded target with `info files` and `info functions`.
+10. How to set, list, hit, continue between, and delete multiple breakpoints.
+11. How to prove that execution reached `_start`, `kernel_entry`, `main`,
+    `init_console`, and `debug_checkpoint` instead of inferring progress only
+    from UART output.
+12. Why a raw breakpoint is useful when symbols are absent, stale, suspicious,
+    or loaded with the wrong address assumptions.
 
 ## Scope
 
@@ -30,6 +41,10 @@ create a U-mode process, add virtual memory, or implement system calls.
 
 The README will explicitly call the target "kernel-style/bare-metal code" and
 will not imply that a function named `kernel_entry` changes CPU privilege.
+
+Lab 11 already introduces QEMU and GDB remote control. Lab 12 will briefly
+recap that mechanism, then use it as a tool for gathering evidence about entry
+addresses and control flow rather than reteaching the entire connection setup.
 
 ## Conceptual Model
 
@@ -78,6 +93,43 @@ objdump -d  -> instruction at that address
 GDB $pc     -> live execution reaches that address
 ```
 
+## Retained Remote-Debugging Objectives
+
+The original Lab 12 failure scenario remains: UART messages alone show that
+something printed, but do not prove the precise instruction or function at
+which the CPU arrived. The learner must stop the target and collect evidence.
+
+The guided exercise will preserve this progression:
+
+1. Build the ELF and inspect its entry, symbols, and disassembly.
+2. Start QEMU with `-s -S` in terminal 1.
+3. Start GDB with `build/kernel.elf` in terminal 2.
+4. Select `riscv:rv64` and connect with `target remote :1234`.
+5. Use `info files` and `info functions` to confirm that GDB has the expected
+   ELF and named symbols.
+6. Set symbolic breakpoints on `kernel_entry` and `debug_checkpoint`, list them
+   with `info breakpoints`, and use `continue` to observe their order.
+7. Inspect `pc`, `sp`, `ra`, and the instruction at `$pc` at each meaningful
+   stop.
+8. Restart the target, delete the symbolic breakpoints, and use
+   `break *0x80000000` to validate the entry independently of the `_start`
+   symbol name.
+
+The README will continue to teach both breakpoint forms:
+
+```gdb
+break kernel_entry       # resolve a name through the ELF symbol table
+break *0x80000000        # insert a breakpoint at an instruction address
+```
+
+It will also preserve the distinction between the two roles of the ELF:
+
+```text
+QEMU reads load addresses and machine code from build/kernel.elf.
+GDB reads symbols and debug information from build/kernel.elf.
+GDB uses the remote protocol to inspect and control QEMU's live CPU.
+```
+
 ## Startup Code Structure
 
 `start.S` will contain only the assembly-specific startup responsibilities:
@@ -108,6 +160,9 @@ main
 The checkpoint functions and UART output will move from assembly to C so the
 learner can see that ordinary C functions can execute in the bare-metal M-mode
 environment. Observable state variables will remain available for GDB.
+
+`init_console` remains a named, non-inlined function so the old symbol-learning
+objective and checkpoint sequence are retained in the C implementation.
 
 No C runtime assumptions will be introduced: no libc, heap, command-line
 arguments, constructors, or implicit process exit. The existing freestanding
@@ -144,7 +199,9 @@ Static verification must prove:
 
 Interactive instructions will ask the learner to confirm the initial PC,
 continue to the raw breakpoint, compare it with `_start`, then continue through
-`kernel_entry`, `main`, and `debug_checkpoint`.
+`kernel_entry`, `main`, `init_console`, and `debug_checkpoint`. They will also
+verify the symbol file, manage multiple breakpoints, and inspect `pc`, `sp`,
+and `ra` at meaningful stops.
 
 ## Documentation Guardrails
 
