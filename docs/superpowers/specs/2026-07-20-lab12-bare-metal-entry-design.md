@@ -185,6 +185,11 @@ polling, observable GDB state, stable `noinline` breakpoints, and the
 `_start`-to-`kernel_entry`-to-`main` handoff. They will explain why the code is
 structured this way without restating obvious C syntax line by line.
 
+The two comments that introduce `volatile` will be in Chinese and will explain
+the compiler constraint directly: accesses must remain real and observable.
+They will also state that `volatile` does not provide atomicity, thread safety,
+or synchronization.
+
 No C runtime assumptions will be introduced: no libc, heap, command-line
 arguments, constructors, or implicit process exit. The existing freestanding
 compiler and linker flags remain in force.
