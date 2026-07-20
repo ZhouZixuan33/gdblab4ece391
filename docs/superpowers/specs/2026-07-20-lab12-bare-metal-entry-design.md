@@ -179,6 +179,12 @@ environment. Observable state variables will remain available for GDB.
 `init_console` remains a named, non-inlined function so the old symbol-learning
 objective and checkpoint sequence are retained in the C implementation.
 
+The C source will use teaching-oriented block comments at conceptual
+boundaries. Comments will explain freestanding execution, MMIO, `volatile`,
+polling, observable GDB state, stable `noinline` breakpoints, and the
+`_start`-to-`kernel_entry`-to-`main` handoff. They will explain why the code is
+structured this way without restating obvious C syntax line by line.
+
 No C runtime assumptions will be introduced: no libc, heap, command-line
 arguments, constructors, or implicit process exit. The existing freestanding
 compiler and linker flags remain in force.
