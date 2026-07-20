@@ -302,6 +302,12 @@ README 的概念顺序先解释 `0x80000000` 的平台与链接来源，再展�
 `build/kernel.elf` 的内部结构。这样 ELF 图中出现的 entry、`_start` 和
 section 起始地址都有前文依据，而不是先展示尚未推导的结论。
 
+ELF 结构讲解还必须给出完整的装载因果链：input sections 经 `linker.ld`
+形成带地址和属性的 output sections，linker 再据此生成 `PT_LOAD` segments
+和 program header table，最后由 QEMU 按 segment 建立运行时内存。说明
+segment 的目的应落到 `.bss` 零初始化、非 `ALLOC` 调试信息不装载，以及
+符号地址对应的字节如何真正进入 guest memory。
+
 The revised lab must not say:
 
 - that all C code runs in U-mode;
