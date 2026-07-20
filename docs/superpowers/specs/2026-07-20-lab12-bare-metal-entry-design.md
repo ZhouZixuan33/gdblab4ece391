@@ -195,6 +195,10 @@ No C runtime assumptions will be introduced: no libc, heap, command-line
 arguments, constructors, or implicit process exit. The existing freestanding
 compiler and linker flags remain in force.
 
+The Makefile will specify `-O0` explicitly. Disabling optimization is not a
+bare-metal requirement; it is a teaching choice that keeps function boundaries,
+variable locations, stepping, and GDB observations straightforward.
+
 The README will explain that `-ffreestanding`, `-nostdlib`, and `-nostartfiles`
 remove the hosted assumptions that normally surround a C `main`. It will also
 distinguish a program image from an OS-managed process and explain the RV64 ABI
