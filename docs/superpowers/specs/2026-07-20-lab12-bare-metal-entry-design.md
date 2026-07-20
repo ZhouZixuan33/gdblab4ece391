@@ -80,6 +80,15 @@ debugger organization) from segments (loader units), explain that `.bss`
 occupies memory without storing an equivalent block of zero bytes in the file,
 and keep UART MMIO at `0x10000000` outside the kernel ELF image.
 
+The README will also include a Chinese linker-script walkthrough before the
+entry-address proof. It will show that Make invokes the GCC driver with
+`-T linker.ld`, the driver invokes the GNU linker, and only the linker reads
+the script. It will explain input versus output sections and the purpose of
+`OUTPUT_ARCH`, `ENTRY`, the location counter, `.text`, `.rodata`, `.data`,
+`.bss`, `COMMON`, `KEEP`, wildcards, and alignment. It will explicitly state
+that QEMU, GDB, and the CPU do not directly read `linker.ld`; they consume the
+resulting ELF or its machine instructions.
+
 The code layout will make the following equality intentional and verifiable:
 
 ```text
