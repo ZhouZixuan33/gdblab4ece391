@@ -12,25 +12,29 @@ by this QEMU configuration, and trace the target from QEMU reset through
 
 After the lab, a learner should be able to explain and demonstrate:
 
-1. Why a normal Linux C program usually runs in U-mode, while this lab runs in
-   M-mode.
-2. Why neither the `.c` suffix nor the name `main` determines privilege mode.
-3. What `-bios none` removes from the boot path and what startup work remains.
-4. How `linker.ld`, the ELF entry, QEMU, and GDB agree on `0x80000000`.
-5. Why the QEMU `virt` reset location and the lab's linked entry address are
+1. The intended roles of RISC-V M-mode, S-mode, and U-mode: initial machine
+   startup, an operating-system kernel, and protected user programs.
+2. Why a normal Linux C program usually runs in U-mode, while this lab starts
+   and remains in M-mode.
+3. Why this lab does not yet perform an M-to-S or S-to-U transition, and why an
+   OS may execute initial boot code in M-mode before its main S-mode kernel.
+4. Why neither the `.c` suffix nor the name `main` determines privilege mode.
+5. What `-bios none` removes from the boot path and what startup work remains.
+6. How `linker.ld`, the ELF entry, QEMU, and GDB agree on `0x80000000`.
+7. Why the QEMU `virt` reset location and the lab's linked entry address are
    different.
-6. What `_start`, `kernel_entry`, and `main` each contribute.
-7. How symbolic and raw-address breakpoints provide complementary evidence.
-8. Why QEMU loads `build/kernel.elf` while GDB reads the same ELF for symbols
+8. What `_start`, `kernel_entry`, and `main` each contribute.
+9. How symbolic and raw-address breakpoints provide complementary evidence.
+10. Why QEMU loads `build/kernel.elf` while GDB reads the same ELF for symbols
    and debug information, but GDB controls the live CPU through QEMU's remote
    stub.
-9. How to configure RV64 in GDB, connect with `target remote :1234`, and verify
+11. How to configure RV64 in GDB, connect with `target remote :1234`, and verify
    the loaded target with `info files` and `info functions`.
-10. How to set, list, hit, continue between, and delete multiple breakpoints.
-11. How to prove that execution reached `_start`, `kernel_entry`, `main`,
+12. How to set, list, hit, continue between, and delete multiple breakpoints.
+13. How to prove that execution reached `_start`, `kernel_entry`, `main`,
     `init_console`, and `debug_checkpoint` instead of inferring progress only
     from UART output.
-12. Why a raw breakpoint is useful when symbols are absent, stale, suspicious,
+14. Why a raw breakpoint is useful when symbols are absent, stale, suspicious,
     or loaded with the wrong address assumptions.
 
 ## Scope
