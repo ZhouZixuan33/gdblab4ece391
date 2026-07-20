@@ -168,6 +168,47 @@ No C runtime assumptions will be introduced: no libc, heap, command-line
 arguments, constructors, or implicit process exit. The existing freestanding
 compiler and linker flags remain in force.
 
+The README will explain that `-ffreestanding`, `-nostdlib`, and `-nostartfiles`
+remove the hosted assumptions that normally surround a C `main`. It will also
+distinguish a program image from an OS-managed process and explain the RV64 ABI
+requirements at the assembly-to-C boundary: a valid aligned stack, `ra` set by
+`call`, and integer return values in `a0`.
+
+## UART and MMIO Boundary
+
+UART is supporting context rather than a second lab topic. The README will use
+the two prominent addresses to contrast RAM and device MMIO:
+
+```text
+0x80000000 -> instructions in RAM, beginning at _start
+0x10000000 -> QEMU virt NS16550A-compatible UART registers
+```
+
+The C code will use a `volatile` byte pointer, poll the line-status transmitter
+ready bit, and write characters to the transmit register. The README will
+explain why `printf` is unavailable, what MMIO and `volatile` mean, and why the
+implementation is polling rather than interrupt-driven.
+
+`init_console` is a named startup boundary and debugger checkpoint, not a full
+UART driver. The text will say that QEMU presents the UART in a state suitable
+for this minimal polling example. Register configuration, PLIC routing, UART
+interrupts, buffering, and a production driver interface remain out of scope.
+
+## ECE391 Bridge
+
+The final conceptual bridge will show how this lab's M-mode-only path prepares
+for the course sequence:
+
+```text
+Lab 12:  M-mode reset -> _start -> kernel_entry -> main
+ECE391:  initial boot -> S-mode kernel -> ELF/user context -> sret -> U-mode
+```
+
+The lab will mention that privilege transitions require architectural
+mechanisms such as traps and `mret`/`sret`; a C call and a function name never
+change privilege. It will not expand into OpenSBI internals, page tables,
+device-tree parsing, system calls, or an interrupt-driven UART.
+
 ## Files to Change
 
 - `lab12-remote-breakpoints/README.md`: replace the short explanation with the
