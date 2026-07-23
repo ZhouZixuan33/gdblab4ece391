@@ -43,6 +43,36 @@ build_lab() {
   echo
 }
 
+verify_lab12_layout() {
+  local lab="week4-qemu-remote-gdb/lab12-remote-breakpoints"
+  local elf="${ROOT_DIR}/${lab}/build/kernel.elf"
+  local entry
+  local start_address
+  local symbol
+
+  echo "== ${lab} entry and symbol check"
+
+  entry="$(riscv64-unknown-elf-readelf -h "${elf}" | awk '/Entry point address:/ { print $4 }')"
+  if [ "${entry}" != "0x80000000" ]; then
+    echo "Expected ELF entry 0x80000000, found ${entry:-missing}."
+    failed=1
+  fi
+
+  start_address="$(riscv64-unknown-elf-nm -n "${elf}" | awk '$3 == "_start" { print $1; exit }')"
+  if [ "${start_address}" != "0000000080000000" ]; then
+    echo "Expected _start at 0000000080000000, found ${start_address:-missing}."
+    failed=1
+  fi
+
+  for symbol in _start kernel_entry main init_console debug_checkpoint scheduler_checkpoint; do
+    if ! riscv64-unknown-elf-nm "${elf}" | awk '{ print $3 }' | grep -Fxq "${symbol}"; then
+      echo "Missing Lab 12 symbol: ${symbol}"
+      failed=1
+    fi
+  done
+  echo
+}
+
 build_scenario_lab() {
   local lab="$1"
   shift
@@ -63,6 +93,7 @@ build_scenario_lab() {
 
 build_lab "week4-qemu-remote-gdb/lab11-qemu-hello"
 build_lab "week4-qemu-remote-gdb/lab12-remote-breakpoints"
+verify_lab12_layout
 build_scenario_lab "week4-qemu-remote-gdb/lab13-registers-and-exceptions" \
   good bad-pointer bad-jump illegal-instruction
 build_scenario_lab "week4-qemu-remote-gdb/lab14-mini-kernel-debug" \
