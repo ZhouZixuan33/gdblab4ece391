@@ -356,6 +356,206 @@ e_entry
 
 实验中将预测与 GDB 结果逐项对照。
 
+### 6.11 贯穿实验的具体例子
+
+Concept Warm-up 不能只给抽象定义。README 必须使用同一组具体地址和值，完整演示状态转换。例子中的地址应与最终 linker script 保持一致；如果实现阶段调整内存布局，README、GDB 输出和下列示例必须同步修改。
+
+#### 例 1：从 M-mode 进入 S-mode
+
+假设：
+
+```text
+supervisor_entry = 0x80200000
+CPU current mode = M
+```
+
+kernel 先设置返回地址：
+
+```asm
+la   t0, supervisor_entry
+csrw mepc, t0
+```
+
+再将 `mstatus.MPP` 设置为 S。README 先给字段语义：
+
+```text
+MPP 位于 mstatus[12:11]
+MPP = 01 表示 S-mode
+```
+
+然后展示一种不破坏其他 `mstatus` bits 的写法：
+
+```asm
+li   t0, (3 << 11)
+csrc mstatus, t0       # 先清除原 MPP
+li   t0, (1 << 11)
+csrs mstatus, t0       # 再设置 MPP = S
+```
+
+执行 `mret` 前，学生填写：
+
+```text
+current pc   = before_mret 附近
+current mode = M
+mepc         = 0x80200000
+MPP          = S
+```
+
+执行：
+
+```asm
+mret
+```
+
+结果：
+
+```text
+pc           = 0x80200000
+current mode = S
+```
+
+README 必须说明 `mret` 不是通过 `t0` 跳转；`t0` 只用于把地址写入 `mepc`，真正被 `mret` 读取的是 CSR `mepc`。
+
+#### 例 2：从 S-mode 进入 user ELF
+
+假设 loader 返回：
+
+```text
+embedded_elf_start = 0x80210000
+loaded PT_LOAD     = 0x80400000 .. 0x80400fff
+ELF e_entry        = 0x80400000
+user stack top     = 0x80410000
+kernel stack top   = 0x80208000
+```
+
+进入用户态前使用合法的 CSR 寄存器形式：
+
+```asm
+li   t0, 0x80400000
+csrw sepc, t0
+li   t0, SSTATUS_SPP
+csrc sstatus, t0            # SPP = 0，选择 U-mode
+li   t0, 0x80208000
+csrw sscratch, t0
+li   sp, 0x80410000
+sret
+```
+
+执行 `sret` 后：
+
+```text
+pc           = 0x80400000
+current mode = U
+sp           = 0x80410000
+sscratch     = 0x80208000
+```
+
+README 必须并列比较：
+
+```text
+0x80210000 是 ELF 文件字节在 kernel image 中的位置；
+0x80400000 是 segment 加载后的地址，同时是本例的 e_entry；
+sepc 必须使用 e_entry，而不是 embedded_elf_start。
+```
+
+#### 例 3：U-mode 执行第一次 `ecall`
+
+假设用户代码为：
+
+```asm
+li   a7, 1              # SYS_PROBE
+ecall                   # address = 0x80400010
+probe_returned:
+li   t0, 0x391
+bne  a0, t0, user_fail
+```
+
+执行 `ecall` 前：
+
+```text
+mode     = U
+pc       = 0x80400010
+a7       = 1
+sp       = 0x80410000
+sscratch = 0x80208000
+stvec    = supervisor_trap_entry
+```
+
+trap 被委托给 S-mode 后，硬件产生：
+
+```text
+mode        = S
+pc          = stvec
+sepc        = 0x80400010
+scause      = 8
+sstatus.SPP = 0
+sp          = 0x80410000       # 硬件没有自动换栈
+```
+
+README 必须要求学生在 GDB 中核对每一项，并解释：
+
+- `scause = 8` 表示 environment call from U-mode；
+- `SPP = 0` 说明 trap 前来自 U-mode；
+- `sepc` 指向 `ecall`，而不是它后面的指令；
+- `sp` 仍是 user stack，证明硬件没有自动切换 kernel stack。
+
+#### 例 4：交换 stack 并返回用户程序
+
+trap entry 执行：
+
+```asm
+csrrw sp, sscratch, sp
+```
+
+交换后：
+
+```text
+sp       = 0x80208000          # kernel stack
+sscratch = 0x80410000          # 暂存 user stack
+```
+
+handler 识别 `a7 = 1` 后：
+
+```text
+old sepc = 0x80400010
+new sepc = 0x80400014
+new a0   = 0x391
+```
+
+恢复最小现场并再次执行 stack 交换后：
+
+```text
+sp       = 0x80410000
+sscratch = 0x80208000
+```
+
+执行 `sret`：
+
+```text
+pc           = 0x80400014
+current mode = U
+a0           = 0x391
+```
+
+用户程序因此从 `probe_returned` 继续，而不是再次执行 `ecall`。
+
+#### 例 5：不更新 `sepc` 的失败路径
+
+README 必须用相同地址展示反例：
+
+```text
+1. U-mode 在 0x80400010 执行 ecall
+2. hardware 写入 sepc = 0x80400010
+3. handler 没有执行 sepc += 4
+4. sret 令 pc = 0x80400010
+5. U-mode 再次执行同一个 ecall
+6. 重复步骤 2–5
+```
+
+GDB 练习要求学生故意临时观察该故障场景，连续两次停在 `supervisor_trap_entry`，记录两次相同的 `sepc`，然后恢复正确实现。
+
+这些例子必须采用“执行前状态 → 指令或事件 → 执行后状态”的固定结构，帮助学生把 CSR 名称、特权级和控制流连接起来。
+
 ## 7. 学生 TODO
 
 设置五个短 TODO，每个只对应一个概念：
