@@ -79,10 +79,25 @@ pc 指向哪条指令？
 
 在逐项解释之前增加一张完整的实验内指令速查表，覆盖 `li`、`la`、
 `mv`、`ld`、`lbu`、`sb`、`addi`、`andi`、`beqz`、`j`、`jr`、
-`call`、`ret` 和 `wfi`。表格固定使用以下四列：
+`call`、`ret` 和 `wfi`。表格固定使用以下五列：
 
-| 写法 | 通俗含义 | 类 C 伪代码 | 是否访问内存 |
-|---|---|---|---|
+| 写法 | 英文全称/拆解 | 通俗含义 | 类 C 伪代码 | 是否访问内存 |
+|---|---|---|---|---|
+
+“英文全称/拆解”列说明助记符的英文来源，例如：
+
+```text
+lbu   load byte unsigned
+ld    load doubleword
+sb    store byte
+addi  add immediate
+beqz  branch if equal to zero
+wfi   wait for interrupt
+```
+
+对于 `li`、`la`、`mv`、`beqz`、`j`、`jr`、`call`、`ret` 等
+pseudoinstruction，在该列同时标明“pseudoinstruction”，避免让学生误以为
+速查表中的每种写法都对应一条独立的硬件指令编码。
 
 速查表必须明确区分寄存器复制与通过地址读取内存：
 
