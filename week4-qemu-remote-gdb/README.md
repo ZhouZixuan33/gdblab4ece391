@@ -14,7 +14,7 @@ These labs stay lightweight. They use a tiny RISC-V `virt` target so you can lea
 - `lab11-qemu-hello`: start a RISC-V QEMU target paused for GDB, connect with `target remote :1234`, and continue execution.
 - `lab12-remote-breakpoints`: load symbols and set breakpoints by function name and raw address.
 - `lab13-registers-and-exceptions`: inspect register and instruction state around controlled exception-style failures.
-- `lab14-mini-kernel-debug`: triage early boot hang, wrong entry, and reset-like behavior.
+- `lab14-mini-kernel-debug`: follow an ECE391-style M-mode → S-mode → U-mode path, load an independent user ELF, and debug a minimal `ecall` trap round trip.
 
 ## Required Packages
 

@@ -96,8 +96,14 @@ build_lab "week4-qemu-remote-gdb/lab12-remote-breakpoints"
 verify_lab12_layout
 build_scenario_lab "week4-qemu-remote-gdb/lab13-registers-and-exceptions" \
   good bad-pointer bad-jump illegal-instruction
-build_scenario_lab "week4-qemu-remote-gdb/lab14-mini-kernel-debug" \
-  good hang wrong-entry reset
+build_lab "week4-qemu-remote-gdb/lab14-mini-kernel-debug"
+
+echo "== Lab 14 ELF and checkpoint check"
+if ! bash "${ROOT_DIR}/week4-qemu-remote-gdb/lab14-mini-kernel-debug/check-lab14.sh"; then
+  echo "Lab 14 static verification failed."
+  failed=1
+fi
+echo
 
 if [ "${failed}" -ne 0 ]; then
   echo "Week 4 build check failed."

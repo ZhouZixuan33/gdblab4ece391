@@ -1,9 +1,14 @@
 LAB := lab14
-SCENARIO ?= hang
-BUILD := build/$(SCENARIO)
-START_OBJ := $(BUILD)/start.o
-KERNEL_ELF := $(BUILD)/kernel.elf
-KERNEL_BIN := $(BUILD)/kernel.bin
+MODE ?= solution
+BUILD := build/$(MODE)
+
+ifeq ($(MODE),solution)
+LAB14_SOLUTION := 1
+else ifeq ($(MODE),exercise)
+LAB14_SOLUTION := 0
+else
+$(error Unknown MODE '$(MODE)'. Use solution or exercise)
+endif
 
 CROSS ?= riscv64-unknown-elf
 CC := $(CROSS)-gcc
@@ -15,63 +20,91 @@ QEMU ?= qemu-system-riscv64
 GDB ?= gdb-multiarch
 INSTALL_HINT := sudo apt install qemu-system-misc gcc-riscv64-unknown-elf binutils-riscv64-unknown-elf gdb-multiarch make
 
-ifeq ($(SCENARIO),good)
-SCENARIO_ID := 0
-else ifeq ($(SCENARIO),hang)
-SCENARIO_ID := 1
-else ifeq ($(SCENARIO),wrong-entry)
-SCENARIO_ID := 2
-else ifeq ($(SCENARIO),reset)
-SCENARIO_ID := 3
-else
-$(error Unknown SCENARIO '$(SCENARIO)'. Use good, hang, wrong-entry, or reset)
-endif
+CFLAGS := -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany -mno-relax \
+	-msmall-data-limit=0 -g -O0 -ffreestanding -fno-pie -nostdlib \
+	-nostartfiles -Wall -Wextra -DLAB14_SOLUTION=$(LAB14_SOLUTION)
+KERNEL_LDFLAGS := -T kernel.ld -Wl,--build-id=none
+USER_LDFLAGS := -T user.ld -Wl,--build-id=none
+QEMU_FLAGS := -machine virt -nographic -bios none -kernel $(BUILD)/kernel.elf
 
-CFLAGS := -march=rv64imac -mabi=lp64 -mcmodel=medany -mno-relax -g -ffreestanding -nostdlib -nostartfiles -Wall -Wextra
-LDFLAGS := -T linker.ld -Wl,--build-id=none
-QEMU_FLAGS := -machine virt -nographic -bios none -kernel $(KERNEL_ELF)
+KERNEL_OBJECTS := \
+	$(BUILD)/boot.o \
+	$(BUILD)/enter_user.o \
+	$(BUILD)/trap.o \
+	$(BUILD)/kernel.o \
+	$(BUILD)/elf_loader.o \
+	$(BUILD)/user_image.o
 
-.PHONY: all run debug gdb log check-tools clean symbols disasm scenarios
+.PHONY: all run debug gdb log check-tools clean symbols disasm user-info check run-check
 
-all: $(KERNEL_ELF) $(KERNEL_BIN)
+all: $(BUILD)/kernel.elf $(BUILD)/kernel.bin
 
 $(BUILD):
 	mkdir -p $(BUILD)
 
-$(START_OBJ): start.S | $(BUILD)
-	$(CC) $(CFLAGS) -DSCENARIO_ID=$(SCENARIO_ID) -c $< -o $@
+$(BUILD)/user.o: user/probe.S | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$(KERNEL_ELF): $(START_OBJ) linker.ld
-	$(CC) $(CFLAGS) $(LDFLAGS) $(START_OBJ) -o $@
+$(BUILD)/user.elf: $(BUILD)/user.o user.ld
+	$(CC) $(CFLAGS) $(USER_LDFLAGS) $< -o $@
 
-$(KERNEL_BIN): $(KERNEL_ELF)
+$(BUILD)/boot.o: boot.S | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/enter_user.o: enter_user.S | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/trap.o: trap.S | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/kernel.o: kernel.c elf_loader.h | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/elf_loader.o: elf_loader.c elf_loader.h | $(BUILD)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/user_image.o: user_image.S $(BUILD)/user.elf
+	$(CC) $(CFLAGS) -DUSER_ELF_PATH=\"$(BUILD)/user.elf\" -c $< -o $@
+
+$(BUILD)/kernel.elf: $(KERNEL_OBJECTS) kernel.ld
+	$(CC) $(CFLAGS) $(KERNEL_LDFLAGS) $(KERNEL_OBJECTS) -o $@
+
+$(BUILD)/kernel.bin: $(BUILD)/kernel.elf
 	$(OBJCOPY) -O binary $< $@
 
-scenarios:
-	@echo "SCENARIO=good"
-	@echo "SCENARIO=hang"
-	@echo "SCENARIO=wrong-entry"
-	@echo "SCENARIO=reset"
-
-symbols: $(KERNEL_ELF)
-	$(NM) -n $(KERNEL_ELF)
-
-disasm: $(KERNEL_ELF)
-	$(OBJDUMP) -d $(KERNEL_ELF)
-
-run: $(KERNEL_ELF)
+run: $(BUILD)/kernel.elf
 	$(QEMU) $(QEMU_FLAGS)
 
-debug: $(KERNEL_ELF)
-	@echo "QEMU will wait for GDB on :1234 for SCENARIO=$(SCENARIO). In another terminal, run: make SCENARIO=$(SCENARIO) gdb"
+debug: $(BUILD)/kernel.elf
+	@echo "QEMU waits for GDB on :1234. In another terminal run: make gdb"
 	$(QEMU) $(QEMU_FLAGS) -s -S
 
-gdb: $(KERNEL_ELF)
-	$(GDB) -q $(KERNEL_ELF) -ex "set architecture riscv:rv64" -ex "target remote :1234"
+gdb: $(BUILD)/kernel.elf
+	$(GDB) -q $(BUILD)/kernel.elf \
+		-ex "set architecture riscv:rv64" \
+		-ex "target remote :1234"
 
-log: $(KERNEL_ELF)
+log: $(BUILD)/kernel.elf
 	$(QEMU) $(QEMU_FLAGS) -d int,cpu_reset -D $(BUILD)/qemu.log
-	@echo "QEMU log: $(BUILD)/qemu.log"
+
+symbols: $(BUILD)/kernel.elf $(BUILD)/user.elf
+	@echo "== kernel symbols"
+	$(NM) -n $(BUILD)/kernel.elf
+	@echo "== user symbols"
+	$(NM) -n $(BUILD)/user.elf
+
+disasm: $(BUILD)/kernel.elf $(BUILD)/user.elf
+	$(OBJDUMP) -d $(BUILD)/kernel.elf
+	$(OBJDUMP) -d $(BUILD)/user.elf
+
+user-info: $(BUILD)/user.elf
+	$(READELF) -h -l $(BUILD)/user.elf
+
+check: all
+	MODE=$(MODE) bash check-lab14.sh
+
+run-check: all
+	MODE=$(MODE) QEMU=$(QEMU) bash run-check-lab14.sh
 
 check-tools:
 	@missing=0; \

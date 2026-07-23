@@ -314,8 +314,8 @@ sscratch = 0x80410000
 必须展示错误循环：
 
 ```text
-ecall at 0x80400010
-  -> sepc = 0x80400010
+ecall at 0x80400004
+  -> sepc = 0x80400004
   -> sret without update
   -> execute ecall again
 ```
@@ -464,7 +464,7 @@ sepc 必须使用 e_entry，而不是 embedded_elf_start。
 
 ```asm
 li   a7, 1              # SYS_PROBE
-ecall                   # address = 0x80400010
+ecall                   # address = 0x80400004
 probe_returned:
 li   t0, 0x391
 bne  a0, t0, user_fail
@@ -474,7 +474,7 @@ bne  a0, t0, user_fail
 
 ```text
 mode     = U
-pc       = 0x80400010
+pc       = 0x80400004
 a7       = 1
 sp       = 0x80410000
 sscratch = 0x80208000
@@ -486,7 +486,7 @@ trap 被委托给 S-mode 后，硬件产生：
 ```text
 mode        = S
 pc          = stvec
-sepc        = 0x80400010
+sepc        = 0x80400004
 scause      = 8
 sstatus.SPP = 0
 sp          = 0x80410000       # 硬件没有自动换栈
@@ -517,8 +517,8 @@ sscratch = 0x80410000          # 暂存 user stack
 handler 识别 `a7 = 1` 后：
 
 ```text
-old sepc = 0x80400010
-new sepc = 0x80400014
+old sepc = 0x80400004
+new sepc = 0x80400008
 new a0   = 0x391
 ```
 
@@ -532,7 +532,7 @@ sscratch = 0x80208000
 执行 `sret`：
 
 ```text
-pc           = 0x80400014
+pc           = 0x80400008
 current mode = U
 a0           = 0x391
 ```
@@ -544,10 +544,10 @@ a0           = 0x391
 README 必须用相同地址展示反例：
 
 ```text
-1. U-mode 在 0x80400010 执行 ecall
-2. hardware 写入 sepc = 0x80400010
+1. U-mode 在 0x80400004 执行 ecall
+2. hardware 写入 sepc = 0x80400004
 3. handler 没有执行 sepc += 4
-4. sret 令 pc = 0x80400010
+4. sret 令 pc = 0x80400004
 5. U-mode 再次执行同一个 ecall
 6. 重复步骤 2–5
 ```
@@ -567,6 +567,22 @@ GDB 练习要求学生故意临时观察该故障场景，连续两次停在 `su
 5. `trap.S`：识别 user `ecall`、执行 `sepc += 4`、返回 `0x391`。
 
 PMP、delegation、ELF parser、segment copy、linker scripts 和用户程序均提供完成版本。
+
+实现提供两个隔离的构建模式：
+
+```text
+MODE=solution   五个教学点使用完整参考实现
+MODE=exercise   五个教学点使用可构建但行为故意错误的占位
+```
+
+构建产物分别写入：
+
+```text
+build/solution/
+build/exercise/
+```
+
+学生先运行 `solution` 建立正常输出基线，再切换到 `exercise`，按照 M→S、S→U、U→S 的顺序逐项修复。两个模式必须保留相同 checkpoint symbols，使 README 中的 GDB 工作流可以直接复用。
 
 ## 8. GDB Checkpoints
 
