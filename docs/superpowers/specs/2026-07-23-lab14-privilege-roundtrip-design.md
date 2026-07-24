@@ -240,17 +240,48 @@ atp     Address Translation and Protection
 
 ### 6.3 CSR 访问
 
-README 只介绍实验实际使用的写法：
+README 只介绍实验实际使用的 CSR pseudoinstruction，不展开更基础的指令编码形式。
 
-```asm
-csrr t0, sepc
-csrw sepc, t0
-csrs sstatus, t0
-csrc sstatus, t0
-csrrw sp, sscratch, sp
+首先提供英文助记：
+
+```text
+csr  Control and Status Register
+r    Read
+w    Write
+s    Set bits
+c    Clear bits
 ```
 
-每条写法必须配类 C 语义和是否有副作用。特别说明 `csrrw` 同时读取旧值并写入新值。
+再使用表格说明：
+
+| 写法 | 英文助记 | 简单语义 |
+|---|---|---|
+| `csrr t0, sepc` | CSR Read | `t0 = sepc` |
+| `csrw sepc, t0` | CSR Write | `sepc = t0` |
+| `csrs sstatus, t0` | CSR Set bits | 将 mask 中为 1 的 bits 设为 1 |
+| `csrc sstatus, t0` | CSR Clear bits | 将 mask 中为 1 的 bits 清为 0 |
+| `csrrw t0, sscratch, t1` | CSR Read and Write | 读出旧 CSR，再写入来源寄存器的值 |
+
+`csrrw` 必须结合 RISC-V 的“目标在前，来源在后”习惯解释：
+
+```asm
+csrrw rd, csr, rs
+      目标  CSR  来源
+```
+
+固定使用以下助记句：
+
+> 旧 CSR 向左读，新值从右写。
+
+并通过具体数值展示：
+
+```text
+before: sscratch = 100, t1 = 200
+csrrw t0, sscratch, t1
+after:  t0 = 100, sscratch = 200
+```
+
+最后再解释本实验的 `csrrw sp, sscratch, sp` 因为目标和来源都是 `sp`，所以能够交换 user stack pointer 和 kernel stack pointer。
 
 ### 6.4 特权级是 CPU 状态
 

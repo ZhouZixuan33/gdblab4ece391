@@ -140,17 +140,86 @@ Supervisor + Exception Program Counter
 
 ## 4. 怎样访问 CSR？
 
-CSR 不能通过普通 load/store 指令直接访问。常用写法：
+CSR 不能通过普通 load/store 指令直接访问。本实验只需要记住四个英文字母：
 
-| 汇编 | 类 C 含义 |
-|---|---|
-| `csrr t0, sepc` | `t0 = sepc` |
-| `csrw sepc, t0` | `sepc = t0` |
-| `csrs sstatus, t0` | `sstatus = sstatus \| t0` |
-| `csrc sstatus, t0` | `sstatus = sstatus & ~t0` |
-| `csrrw sp, sscratch, sp` | 交换思想：读取旧 `sscratch`，同时写入旧 `sp` |
+```text
+csr  Control and Status Register
+r    Read
+w    Write
+s    Set bits
+c    Clear bits
+```
 
-`csrr`、`csrw`、`csrs` 和 `csrc` 是方便阅读的 assembler pseudoinstruction。它们会展开成基础 CSR 指令。
+因此可以这样读命令：
+
+| 汇编 | 英文助记 | 简单含义 |
+|---|---|---|
+| `csrr t0, sepc` | CSR **R**ead | 读取：`t0 = sepc` |
+| `csrw sepc, t0` | CSR **W**rite | 写入：`sepc = t0` |
+| `csrs sstatus, t0` | CSR **S**et bits | `t0` 中为 1 的 bits 在 `sstatus` 中被设为 1 |
+| `csrc sstatus, t0` | CSR **C**lear bits | `t0` 中为 1 的 bits 在 `sstatus` 中被清为 0 |
+| `csrrw t0, sscratch, t1` | CSR **R**ead and **W**rite | 读出旧 `sscratch` 到 `t0`，再把 `t1` 写入 `sscratch` |
+
+### 4.1 怎样记住操作数顺序？
+
+RISC-V 常用的操作数习惯是：
+
+```text
+目标在前，来源在后
+destination, source
+```
+
+对于 `csrrw`，CSR 固定放在中间：
+
+```asm
+csrrw rd, csr, rs
+      目标  CSR  来源
+```
+
+可以记成：
+
+> 旧 CSR 向左读，新值从右写。
+
+```text
+rd  ←  csr  ←  rs
+```
+
+具体例子：
+
+```asm
+csrrw t0, sscratch, t1
+```
+
+假设执行前：
+
+```text
+sscratch = 100
+t1       = 200
+```
+
+执行后：
+
+```text
+t0       = 100    旧 CSR 值被读到目标寄存器
+sscratch = 200    来源寄存器的值被写入 CSR
+```
+
+本实验使用：
+
+```asm
+csrrw sp, sscratch, sp
+```
+
+左右两边恰好都是 `sp`，因此：
+
+```text
+sp       ← 旧 sscratch
+sscratch ← 旧 sp
+```
+
+它会交换 user stack pointer 和 kernel stack pointer。
+
+`csrr`、`csrw`、`csrs` 和 `csrc` 是 assembler 提供的方便写法。本实验直接使用即可，不展开它们的底层编码形式。
 
 设置单个字段时，通常不要把整个 CSR 粗暴覆盖成一个常量。应通过 set/clear 只改变目标 bits。
 
