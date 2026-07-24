@@ -230,11 +230,13 @@ sscratch ← 旧 sp
 假设：
 
 ```text
-supervisor_entry = 0x80200000
+supervisor_entry = 0x80200000  #S Mode entry address
 current mode     = M
 ```
 
 ### 5.1 设置 `mepc`
+
+mepc 控制M MODE下mret 后从哪个 PC 执行
 
 ```asm
 la   t0, supervisor_entry
@@ -249,6 +251,8 @@ mepc = 0x80200000
 ```
 
 ### 5.2 设置 `mstatus.MPP`
+
+mstatus.MPP 控制mret 后进入哪个 mode？
 
 `MPP` 位于 `mstatus[12:11]`：
 
@@ -289,7 +293,65 @@ current mode = S
 
 ## 6. 具体例子：加载 ELF 并进入 U-mode
 
-假设 loader 给出：
+### 6.1 什么是 kernel？
+
+kernel（内核）是操作系统中以较高 privilege mode 运行的核心程序。在本实验里：
+
+```text
+M-mode boot code
+    先完成最初的 CPU 配置
+
+S-mode kernel
+    加载用户程序
+    准备用户入口和用户栈
+    处理来自 U-mode 的 trap
+```
+
+`supervisor_entry` 是 S-mode kernel 的入口。CPU 到达这里后，接下来由 kernel 决定加载哪个用户程序，以及从哪里进入 U-mode。
+
+### 6.2 什么是 embedded user ELF？
+
+user ELF 是一个独立构建的用户程序文件：
+
+```text
+user/probe.S
+    -> assembler 和 linker
+    -> build/solution/user.elf
+```
+
+本实验还没有文件系统，kernel 无法像 Linux 一样从磁盘打开 `user.elf`。因此构建系统使用 `.incbin`，把整个 `user.elf` 文件的原始 bytes 放进 kernel image：
+
+```text
+kernel image
+├── M-mode boot code
+├── S-mode kernel code
+├── ELF loader
+└── embedded user ELF bytes
+```
+
+这份位于 kernel image 内部的 ELF 文件副本称为 **embedded user ELF**。
+
+```text
+embedded
+    嵌入到另一个文件或程序内部
+
+embedded user ELF
+    嵌入 kernel image 的完整 user.elf 文件 bytes
+```
+
+注意：embedded user ELF 仍然是一个“ELF 文件”，里面包含 ELF header、program header 和用户程序的机器码。它还没有被 loader 放到最终的用户执行地址。
+
+### 6.3 三个地址分别表示什么？
+
+可以把加载 ELF 类比成安装并启动一个程序：
+
+| 本实验中的地址 | 类比 | 实际含义 |
+|---|---|---|
+| `embedded_user_elf_start` | 安装包存放的位置 | 整个 `user.elf` 文件在 kernel image 中的起始地址 |
+| `PT_LOAD destination` | 程序的安装位置 | loader 将用户代码和数据复制到的内存地址 |
+| `ELF e_entry` | 程序的启动入口 | 加载完成后应该执行的第一条用户指令地址 |
+
+本实验的一组具体值是：
 
 ```text
 embedded_user_elf_start = 0x800xxxxx
@@ -299,19 +361,54 @@ user stack top          = 0x80410000
 kernel stack top        = 0x800xxxxx
 ```
 
-注意三个地址的区别：
+这里 `PT_LOAD destination` 和 `e_entry` 恰好都是 `0x80400000`，但含义不同：
 
 ```text
-embedded_user_elf_start  ELF 文件字节在 kernel image 中的位置
-PT_LOAD destination      用户代码实际被复制到的位置
-e_entry                  用户程序第一条指令的位置
+PT_LOAD destination
+    描述整个 loadable segment 从哪里开始
+
+e_entry
+    描述 CPU 应从哪一条用户指令开始执行
 ```
 
-进入用户程序时，`sepc` 必须使用 `e_entry`，不能使用 embedded ELF 的源地址。
+更一般的 ELF 中，`e_entry` 可以位于某个 `PT_LOAD` segment 内部，不一定等于 segment 的起始地址。
+
+### 6.4 Loader 做了什么？
+
+kernel 调用已提供的最小 loader：
+
+```text
+读取 embedded user ELF
+    -> 检查 ELF64 和 RISC-V 格式
+    -> 找到 PT_LOAD program header
+    -> 将 segment 复制到 0x80400000
+    -> 返回 e_entry = 0x80400000
+```
+
+对应到本实验的结果：
+
+```text
+loaded_user.segment_start = 0x80400000
+loaded_user.segment_end   = segment 末尾
+loaded_user.entry         = 0x80400000
+```
+
+ELF loader 的实现已经提供。学生只需要理解 loader 的输入、复制结果和返回的 entry，不需要从零编写 ELF parser。
+
+### 6.5 Kernel 怎样进入 U-mode？
+
+loader 完成后，S-mode kernel 需要准备四项状态：
+
+| 状态 | 设置的值 | 目的 |
+|---|---|---|
+| `sepc` | `loaded_user.entry` | 决定 `sret` 后的用户 PC |
+| `sstatus.SPP` | `0`，即 U-mode | 决定 `sret` 后的 privilege mode |
+| `sscratch` | kernel stack pointer | 为下一次 U→S trap 保存 kernel stack |
+| `sp` | `0x80410000` | 安装 user stack pointer |
 
 ```asm
-li   t0, 0x80400000
-csrw sepc, t0
+li   t0, 0x80400000     # loaded_user.entry
+csrw sepc, t0           # sret 后的 PC
 
 li   t0, (1 << 8)       # SSTATUS_SPP
 csrc sstatus, t0        # SPP = 0，选择 U-mode
@@ -321,20 +418,32 @@ li   sp, 0x80410000     # 安装 user sp
 sret
 ```
 
-`sret` 使用：
+执行 `sret` 前：
+
+```text
+current mode = S
+sepc         = 0x80400000
+SPP          = 0
+sscratch     = kernel stack
+sp           = 0x80410000
+```
+
+`sret` 根据 CSR 同时决定“去哪里”和“以什么 mode 执行”：
 
 ```text
 pc   <- sepc
 mode <- sstatus.SPP
 ```
 
-结果：
+执行 `sret` 后：
 
 ```text
 pc           = 0x80400000
 current mode = U
 sp           = 0x80410000
 ```
+
+此时 CPU 已离开 S-mode kernel，开始执行 `user/probe.S` 中 `_user_start` 的第一条用户指令。
 
 ---
 

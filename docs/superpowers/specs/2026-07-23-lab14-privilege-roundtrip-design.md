@@ -368,7 +368,19 @@ ecall at 0x80400004
 
 ### 6.9 ELF 最小模型
 
-只介绍：
+先用初学者语言定义：
+
+```text
+kernel
+    操作系统中以较高 privilege mode 运行的核心程序；
+    本实验的 S-mode kernel 负责加载用户程序、准备 U-mode 和处理 trap。
+
+embedded user ELF
+    通过 .incbin 嵌入 kernel image 的完整 user.elf 文件 bytes；
+    它仍然包含 ELF header 和 program header，尚未位于最终用户执行地址。
+```
+
+再介绍最小加载过程：
 
 ```text
 ELF bytes
@@ -385,7 +397,19 @@ p_vaddr / p_paddr
 e_entry
 ```
 
-不介绍 section header、dynamic linking 或 relocation。
+使用“安装包位置、程序安装位置、程序启动入口”的类比，但不加入错误执行反例，也不介绍 section header、dynamic linking 或 relocation。
+
+S-mode kernel 进入用户程序的例子必须依次展示：
+
+```text
+loader 返回 loaded_user.entry
+    -> sepc = loaded_user.entry
+    -> SPP = U
+    -> sscratch = kernel sp
+    -> sp = user stack top
+    -> sret
+    -> pc = e_entry, mode = U
+```
 
 ### 6.10 Warm-up 预测表
 
