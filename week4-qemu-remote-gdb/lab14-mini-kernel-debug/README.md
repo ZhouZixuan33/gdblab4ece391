@@ -430,6 +430,28 @@ ecall   触发同步 exception，将控制权交给 kernel
 
 `ecall` 不是普通函数调用：CPU 会进入 `stvec` 指向的 trap handler，并将 trap 原因和相关 PC 记录在 CSR 中。
 
+### 7.1 Concept Warm-up：哪些状态由谁改变？
+
+把 `ecall` 分成三个时间点：
+
+| 时间 | 发生什么 | 谁完成 |
+|---|---|---|
+| `ecall` 之前 | 设置 `medeleg`，将 U-mode environment call 委托给 S-mode | M-mode boot；框架已提供 |
+| `ecall` 之前 | 设置 `stvec`，指定 S-mode trap handler | S-mode kernel；学生 TODO 3 |
+| 执行 `ecall` 时 | 写入 `sepc/scause/SPP`，令 `pc = stvec`，进入 S-mode | CPU 硬件自动完成 |
+| 进入 handler 后 | 检查 `scause/a7`、执行 `sepc += 4`、设置 `a0` 返回值 | S-mode kernel；学生 TODO 5 |
+
+简化时间线：
+
+```text
+kernel 预先设置 medeleg 和 stvec
+    -> U-mode 执行 ecall
+    -> CPU 自动记录 trap 状态并进入 S-mode
+    -> trap handler 处理请求并准备返回
+```
+
+因此，学生不需要在 `ecall` 前手动写入 `sepc`、`scause` 或 `SPP`；这些值是在 `ecall` 触发 trap 时由 CPU 自动记录的。
+
 用户程序：
 
 ```asm
@@ -450,7 +472,7 @@ sp       = 0x80410000
 sscratch = kernel stack
 ```
 
-因为 M-mode boot 已将 U-mode `ecall` 委托给 S-mode，CPU 自动执行：
+因为 `medeleg` 和 `stvec` 已在 `ecall` 前配置完成，执行 `ecall` 时 CPU 自动：
 
 ```text
 sepc        <- 0x80400004

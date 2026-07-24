@@ -323,6 +323,16 @@ ecall 触发同步 exception，将控制权交给 S-mode kernel
 
 不在此处展开完整 syscall ABI；重点是区分“`a7` 说明请求什么”和“`ecall` 触发 trap”。
 
+紧接着加入简短的三阶段 Concept Warm-up：
+
+| 时间 | 配置或状态变化 | 责任方 |
+|---|---|---|
+| `ecall` 前 | `medeleg`、`stvec` | M-mode boot / S-mode kernel |
+| 执行 `ecall` 时 | `sepc`、`scause`、`SPP`、`pc`、mode | CPU 硬件 |
+| 进入 handler 后 | 检查原因、`sepc += 4`、设置返回值 | S-mode kernel |
+
+必须明确本实验中 delegation 由框架提供、`stvec` 是学生 TODO 3、handler 返回处理是学生 TODO 5。学生不需要在 `ecall` 前手动写入 `sepc`、`scause` 或 `SPP`。
+
 U-mode `ecall` 被委托给 S-mode 时，硬件自动：
 
 ```text
