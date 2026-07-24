@@ -211,17 +211,30 @@ Concept Warm-up 是本实验的必要组成部分，预计 20–25 分钟。它�
 
 ### 6.2 本实验的重要 CSR
 
-| CSR | 初学者需要掌握的含义 | 谁更新 | 谁使用 |
-|---|---|---|---|
-| `mstatus.MPP` | `mret` 返回后的 mode | kernel | `mret` |
-| `mepc` | `mret` 的目标 PC | kernel或 M-mode trap 硬件 | `mret` |
-| `medeleg` | 哪些 exception 交给 S-mode | 框架中的 M-mode boot | trap 硬件 |
-| `sstatus.SPP` | trap 前的 mode，也是 `sret` 选择的返回 mode | trap 硬件；kernel 可修改 | `sret` |
-| `sepc` | trap 相关 PC，也是 `sret` 的目标 PC | trap 硬件；handler 可修改 | `sret` |
-| `stvec` | S-mode trap 入口地址 | kernel | trap 硬件 |
-| `scause` | trap 原因 | trap 硬件 | handler |
-| `sscratch` | S-mode trap 的临时状态，本实验保存 kernel/user stack | kernel 与 trap entry | trap entry |
-| `satp` | 地址转换配置 | kernel | 地址转换硬件 |
+| CSR | 英文全称与缩写拆解 | 初学者需要掌握的含义 | 谁更新 | 谁使用 |
+|---|---|---|---|---|
+| `mstatus.MPP` | **M**achine **Status** Register / **M**achine **P**revious **P**rivilege mode | `mret` 返回后的 mode | kernel | `mret` |
+| `mepc` | **M**achine **E**xception **P**rogram **C**ounter | `mret` 的目标 PC | kernel 或 M-mode trap 硬件 | `mret` |
+| `medeleg` | **M**achine **E**xception **Deleg**ation Register | 哪些 exception 交给 S-mode | 框架中的 M-mode boot | trap 硬件 |
+| `sstatus.SPP` | **S**upervisor **Status** Register / **S**upervisor **P**revious **P**rivilege mode | trap 前的 mode，也是 `sret` 选择的返回 mode | trap 硬件；kernel 可修改 | `sret` |
+| `sepc` | **S**upervisor **E**xception **P**rogram **C**ounter | trap 相关 PC，也是 `sret` 的目标 PC | trap 硬件；handler 可修改 | `sret` |
+| `stvec` | **S**upervisor **T**rap **Vec**tor Base Address Register | S-mode trap 入口地址 | kernel | trap 硬件 |
+| `scause` | **S**upervisor **Cause** Register | trap 原因 | trap 硬件 | handler |
+| `sscratch` | **S**upervisor **Scratch** Register | S-mode trap 的临时状态，本实验保存 kernel/user stack | kernel 与 trap entry | trap entry |
+| `satp` | **S**upervisor **A**ddress **T**ranslation and **P**rotection Register | 地址转换配置 | kernel | 地址转换硬件 |
+
+表后提供统一助记规则：
+
+```text
+m       Machine
+s       Supervisor
+status  CPU status
+epc     Exception Program Counter
+tvec    Trap Vector
+cause   trap cause
+scratch 临时保存位置
+atp     Address Translation and Protection
+```
 
 `satp` 在本实验设为 0。学生只需知道当前不启用页表，不展开其字段。
 

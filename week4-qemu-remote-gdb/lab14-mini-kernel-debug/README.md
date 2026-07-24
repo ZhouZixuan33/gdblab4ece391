@@ -102,17 +102,39 @@ sepc  CSR，保存 S-mode trap 相关的 PC
 
 ## 3. 本实验使用的重要 CSR
 
-| CSR | 它回答的问题 | 谁写入 | 谁使用 |
-|---|---|---|---|
-| `mstatus.MPP` | `mret` 后进入哪个 mode？ | M-mode kernel | `mret` |
-| `mepc` | `mret` 后从哪个 PC 执行？ | M-mode kernel 或 trap 硬件 | `mret` |
-| `medeleg` | 哪些 exception 交给 S-mode？ | M-mode kernel | trap 硬件 |
-| `sstatus.SPP` | trap 前来自哪个 mode？`sret` 返回哪个 mode？ | trap 硬件；kernel 也可修改 | `sret` |
-| `sepc` | trap 相关的 PC 是多少？ | trap 硬件；handler 也可修改 | `sret` |
-| `stvec` | S-mode trap handler 在哪里？ | S-mode kernel | trap 硬件 |
-| `scause` | 为什么发生 trap？ | trap 硬件 | trap handler |
-| `sscratch` | trap entry 从哪里取得 kernel stack？ | kernel 和 trap entry | trap entry |
-| `satp` | 是否启用地址转换？ | S-mode kernel | 地址转换硬件 |
+| CSR | 英文全称与缩写拆解 | 它回答的问题 | 谁写入 | 谁使用 |
+|---|---|---|---|---|
+| `mstatus.MPP` | **M**achine **Status** Register / **M**achine **P**revious **P**rivilege mode | `mret` 后进入哪个 mode？ | M-mode kernel | `mret` |
+| `mepc` | **M**achine **E**xception **P**rogram **C**ounter | `mret` 后从哪个 PC 执行？ | M-mode kernel 或 trap 硬件 | `mret` |
+| `medeleg` | **M**achine **E**xception **Deleg**ation Register | 哪些 exception 交给 S-mode？ | M-mode kernel | trap 硬件 |
+| `sstatus.SPP` | **S**upervisor **Status** Register / **S**upervisor **P**revious **P**rivilege mode | trap 前来自哪个 mode？`sret` 返回哪个 mode？ | trap 硬件；kernel 也可修改 | `sret` |
+| `sepc` | **S**upervisor **E**xception **P**rogram **C**ounter | trap 相关的 PC 是多少？ | trap 硬件；handler 也可修改 | `sret` |
+| `stvec` | **S**upervisor **T**rap **Vec**tor Base Address Register | S-mode trap handler 在哪里？ | S-mode kernel | trap 硬件 |
+| `scause` | **S**upervisor **Cause** Register | 为什么发生 trap？ | trap 硬件 | trap handler |
+| `sscratch` | **S**upervisor **Scratch** Register | trap entry 从哪里取得 kernel stack？ | kernel 和 trap entry | trap entry |
+| `satp` | **S**upervisor **A**ddress **T**ranslation and **P**rotection Register | 是否启用地址转换？ | S-mode kernel | 地址转换硬件 |
+
+这些名字有稳定的助记规律：
+
+```text
+m       Machine
+s       Supervisor
+status  CPU status
+epc     Exception Program Counter
+tvec    Trap Vector
+cause   trap cause
+scratch 临时保存位置
+atp     Address Translation and Protection
+```
+
+例如，看到 `sepc` 时可以先拆成：
+
+```text
+s + epc
+Supervisor + Exception Program Counter
+```
+
+因此即使暂时忘记细节，也能推断它与 S-mode trap 的程序计数器有关。
 
 本实验设置 `satp = 0`，不启用页表。
 
