@@ -313,6 +313,16 @@ mret 后 pc 和 mode 分别是什么？
 
 ### 6.6 Trap 时硬件和软件的边界
 
+README 在第一次展示用户代码前，用不超过三句话解释：
+
+```text
+ecall = Environment Call
+a7 保存服务编号
+ecall 触发同步 exception，将控制权交给 S-mode kernel
+```
+
+不在此处展开完整 syscall ABI；重点是区分“`a7` 说明请求什么”和“`ecall` 触发 trap”。
+
 U-mode `ecall` 被委托给 S-mode 时，硬件自动：
 
 ```text

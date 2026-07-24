@@ -331,19 +331,12 @@ kernel image
 
 这份位于 kernel image 内部的 ELF 文件副本称为 **embedded user ELF**。
 
-```text
-embedded
-    嵌入到另一个文件或程序内部
-
-embedded user ELF
-    嵌入 kernel image 的完整 user.elf 文件 bytes
-```
 
 注意：embedded user ELF 仍然是一个“ELF 文件”，里面包含 ELF header、program header 和用户程序的机器码。它还没有被 loader 放到最终的用户执行地址。
 
-### 6.3 三个地址分别表示什么？
+### 6.3 加载 embedded user ELF
 
-可以把加载 ELF 类比成安装并启动一个程序：
+可以把加载 user ELF 类比成安装并启动一个程序：
 
 | 本实验中的地址 | 类比 | 实际含义 |
 |---|---|---|
@@ -373,31 +366,10 @@ e_entry
 
 更一般的 ELF 中，`e_entry` 可以位于某个 `PT_LOAD` segment 内部，不一定等于 segment 的起始地址。
 
-### 6.4 Loader 做了什么？
 
-kernel 调用已提供的最小 loader：
+### 6.4 Kernel （S-mode）怎样进入 U-mode？
 
-```text
-读取 embedded user ELF
-    -> 检查 ELF64 和 RISC-V 格式
-    -> 找到 PT_LOAD program header
-    -> 将 segment 复制到 0x80400000
-    -> 返回 e_entry = 0x80400000
-```
-
-对应到本实验的结果：
-
-```text
-loaded_user.segment_start = 0x80400000
-loaded_user.segment_end   = segment 末尾
-loaded_user.entry         = 0x80400000
-```
-
-ELF loader 的实现已经提供。学生只需要理解 loader 的输入、复制结果和返回的 entry，不需要从零编写 ELF parser。
-
-### 6.5 Kernel 怎样进入 U-mode？
-
-loader 完成后，S-mode kernel 需要准备四项状态：
+S-Mode 下，kernel 里的 ELF loader 将user ELF load 完成后，S-mode kernel 需要准备四项状态：
 
 | 状态 | 设置的值 | 目的 |
 |---|---|---|
@@ -448,6 +420,15 @@ sp           = 0x80410000
 ---
 
 ## 7. 具体例子：U-mode 执行 `ecall`
+
+`ecall` 是 **Environment Call**。U-mode 用户程序用它主动请求 S-mode kernel 提供服务。
+
+```text
+a7      保存请求编号，说明“需要哪项服务”
+ecall   触发同步 exception，将控制权交给 kernel
+```
+
+`ecall` 不是普通函数调用：CPU 会进入 `stvec` 指向的 trap handler，并将 trap 原因和相关 PC 记录在 CSR 中。
 
 用户程序：
 
