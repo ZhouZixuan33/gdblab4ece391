@@ -227,6 +227,15 @@ sscratch ← 旧 sp
 
 ## 5. 具体例子：从 M-mode 进入 S-mode
 
+这一段由 `boot.S` 完成，属于实验框架，学生不需要修改。理解它的关键作用即可：
+
+1. 配置 PMP，允许后续 S-mode 和 U-mode 访问本实验使用的内存；
+2. 配置 `medeleg`，把 U-mode `ecall` 委托给 S-mode；
+3. 用 `mstatus.MPP` 和 `mepc` 准备 M→S 的返回状态；
+4. 执行 `mret`，进入 S-mode 的 `supervisor_entry`。
+
+下面只展开第 3、4 步，帮助理解 `mret` 怎样决定下一个 privilege mode 和 PC。
+
 假设：
 
 ```text
@@ -292,6 +301,10 @@ current mode = S
 ---
 
 ## 6. 具体例子：加载 ELF 并进入 U-mode
+
+这一流程由多个文件共同完成。`elf_loader.c`、`user_image.S` 和 `kernel.c` 中调用 loader 的部分由框架提供，学生不需要实现 ELF 解析；学生只需理解 embedded user ELF、`PT_LOAD` 目标地址和 ELF entry 分别表示什么。
+
+真正需要学生掌握并完成的是 `enter_user.S`：把 ELF entry 写入 `sepc`，设置 `sstatus.SPP`，准备用户栈和 `sscratch`，最后执行 `sret` 进入 U-mode。
 
 ### 6.1 什么是 kernel？
 
@@ -437,9 +450,9 @@ ecall   触发同步 exception，将控制权交给 kernel
 | 时间 | 发生什么 | 谁完成 |
 |---|---|---|
 | `ecall` 之前 | 设置 `medeleg`，将 U-mode environment call 委托给 S-mode | M-mode boot；框架已提供 |
-| `ecall` 之前 | 设置 `stvec`，指定 S-mode trap handler | S-mode kernel；学生 TODO 3 |
+| `ecall` 之前 | 设置 `stvec`，指定 S-mode trap handler | S-mode kernel；学生 TODO 1 |
 | 执行 `ecall` 时 | 写入 `sepc/scause/SPP`，令 `pc = stvec`，进入 S-mode | CPU 硬件自动完成 |
-| 进入 handler 后 | 检查 `scause/a7`、执行 `sepc += 4`、设置 `a0` 返回值 | S-mode kernel；学生 TODO 5 |
+| 进入 trap handler 后 | 检查 `scause/a7`、执行 `sepc += 4`、设置 `a0` 返回值 | S-mode kernel；学生 TODO 3 |
 
 简化时间线：
 
@@ -507,6 +520,15 @@ SPP = 0     trap 之前处于 U-mode
 
 ## 8. 具体例子：交换 user stack 和 kernel stack
 
+这次栈交换实际写在 `trap.S` 的 `supervisor_trap_entry` 中，返回 U-mode 前还会再交换一次。Lab 14 已提供这部分代码，不要求学生自己实现；但学生需要理解为什么必须交换、`sp` 和 `sscratch` 在交换前后分别保存什么，以及为什么 CPU 发生 trap 时不会自动切换栈。后续实现完整 trap frame 时会直接使用这个基础。
+
+| 名称 | 含义 | 本实验中的作用 |
+|---|---|---|
+| `sp` | **Stack Pointer**，普通寄存器 | 指向当前实际使用的栈 |
+| `sscratch` | **Supervisor Scratch Register**，S-mode CSR | 临时保存当前未使用的那个栈指针 |
+
+发生 trap 时，CPU 不会自动切换 `sp`。内核既要改用 kernel stack，又不能丢失以后要恢复的 user `sp`，因此本实验用 `sscratch` 暂存它。
+
 trap entry 开始时：
 
 ```text
@@ -535,9 +557,11 @@ sscratch = 0x80410000    暂存 user stack
 
 ---
 
-## 9. 为什么必须执行 `sepc += 4`？
+## 9. 处理完 `ecall` 后，为什么返回前要执行 `sepc += 4`？
 
-`ecall` 是同步 exception，`sepc` 指向触发 trap 的 `ecall`：
+U-mode 执行 `ecall` 后，CPU 把 `ecall` 本身的地址保存到 `sepc`。`trap.S` 处理完这次系统调用后需要执行 `sret` 返回 U-mode，因此必须先让 `sepc` 指向 `ecall` 的下一条指令。
+
+`ecall` 是同步 exception，此时 `sepc` 指向触发 trap 的 `ecall`：
 
 ```text
 ecall address = 0x80400004
@@ -597,21 +621,49 @@ trap
 # 实验文件
 
 ```text
-boot.S          M-mode boot、PMP、delegation、M→S
-kernel.c        S-mode kernel、安装 stvec、调用 ELF loader
-elf_loader.c    已完成的最小 ELF64 PT_LOAD loader
-enter_user.S    设置 sepc/SPP/stack，S→U
-trap.S          stack 交换、最小保存、probe/exit
-user/probe.S    独立 user ELF
-kernel.ld       kernel 链接布局
-user.ld         user ELF 链接到 0x80400000
+boot.S          框架提供：M-mode boot、PMP、delegation、M→S
+kernel.c        学生 TODO 1：安装 stvec；其余 S-mode kernel 框架已提供
+enter_user.S    学生 TODO 2：设置 sepc/SPP/stack，S→U
+trap.S          学生 TODO 3：处理 ecall；stack 交换和最小保存已提供
+elf_loader.c    框架提供：已完成的最小 ELF64 PT_LOAD loader
+user/probe.S    框架提供：独立 user ELF 测试程序
+user_image.S    框架提供：把 user ELF 嵌入 kernel image
+kernel.ld       框架提供：kernel 链接布局
+user.ld         框架提供：user ELF 链接到 0x80400000
+Makefile        框架提供：构建 solution/exercise
 ```
 
-源码中有五个 `LAB14 TODO` 教学点，并提供两个构建模式：
+建议先按下面的运行流程阅读文件：
+
+```text
+boot.S: _start                         框架：M→S
+    ↓ mret
+kernel.c: supervisor_entry             TODO 1：设置 stvec
+    ↓ 调用
+elf_loader.c: load_user_elf            框架：加载 user ELF
+    ↓ 调用
+enter_user.S: enter_user               TODO 2：准备 S→U
+    ↓ sret
+user/probe.S: _user_start              框架：执行 ecall
+    ↓ CPU 根据 stvec 进入
+trap.S: supervisor_trap_entry          TODO 3：处理 ecall
+    ↓ sret 或调用 C
+user/probe.S / kernel.c                返回用户程序或结束实验
+```
+
+图中的 `mret`、`sret` 和 trap 转移是 CPU 改变控制流，不是普通函数调用。
+
+| 想实现的功能 | 去哪个文件找 |
+|---|---|
+| 设置 S-mode trap 入口 | `kernel.c`，TODO 1 |
+| 准备用户 PC、mode 和 stack | `enter_user.S`，TODO 2 |
+| 处理 `ecall` 并设置返回值 | `trap.S`，TODO 3 |
+
+源码中有三个 `LAB14 TODO` 教学点，并提供两个构建模式：
 
 ```text
 MODE=solution   完整参考实现，用于先建立正常基线
-MODE=exercise   可构建但行为故意错误，学生逐项补全五个 TODO
+MODE=exercise   可构建但行为故意错误，学生逐项补全三个 TODO
 ```
 
 两个模式使用不同构建目录，避免旧 object file 混入：
@@ -687,27 +739,16 @@ make MODE=exercise debug
 `exercise` 版本故意保留以下错误：
 
 ```text
-TODO 1  没有设置 mstatus.MPP
-TODO 2  没有设置 mepc
-TODO 3  stvec 被设置为 0
-TODO 4  sepc/SPP 未正确准备
-TODO 5  没有跳过 ecall，也没有返回 0x391
+TODO 1  stvec 被设置为 0
+TODO 2  sepc/SPP 未正确准备
+TODO 3  没有跳过 ecall，也没有返回 0x391
 ```
 
-从 TODO 1 和 TODO 2 开始修复。每修复一个阶段，都先在对应 checkpoint 用 GDB 验证 CSR，再继续下一阶段。
+从 TODO 1 开始依次修复。每修复一个阶段，都先在对应 checkpoint 用 GDB 验证 CSR，再继续下一阶段。
 
 ---
 
 # 运行前预测表
-
-先填写“你的预测”，再启动 GDB：
-
-| Checkpoint | 当前 mode | 下一 PC 来自哪里 | 下一 mode 由什么决定 |
-|---|---|---|---|
-| `before_mret` |  |  |  |
-| `before_user_sret` |  |  |  |
-| `user_probe_ecall` 之后 |  |  |  |
-| `before_probe_sret` |  |  |  |
 
 参考模型应为：
 

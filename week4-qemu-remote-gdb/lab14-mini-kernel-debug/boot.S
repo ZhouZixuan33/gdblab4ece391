@@ -29,26 +29,15 @@ _start:
     la a0, msg_machine_boot
     call uart_puts
 
-#if LAB14_SOLUTION
-    # Reference solution for LAB14 TODO 1.
+    # mret will enter S-mode.
     li t0, MSTATUS_MPP_MASK
     csrc mstatus, t0
     li t0, MSTATUS_MPP_S
     csrs mstatus, t0
-#else
-    # LAB14 TODO 1 (exercise): set mstatus.MPP to S without changing
-    # unrelated mstatus bits.
-    nop
-#endif
 
-#if LAB14_SOLUTION
-    # Reference solution for LAB14 TODO 2.
+    # mret will continue at the S-mode kernel entry.
     la t0, supervisor_entry
     csrw mepc, t0
-#else
-    # LAB14 TODO 2 (exercise): write supervisor_entry to mepc.
-    nop
-#endif
 
 before_mret:
     mret

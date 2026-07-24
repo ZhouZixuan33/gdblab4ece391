@@ -7,7 +7,7 @@
 # void enter_user(unsigned long entry, unsigned long user_stack_top)
 enter_user:
 #if LAB14_SOLUTION
-    # Reference solution for LAB14 TODO 4.
+    # Reference solution for LAB14 TODO 2.
     csrw sepc, a0
     li t0, SSTATUS_SPP
     csrc sstatus, t0
@@ -17,7 +17,7 @@ enter_user:
     csrw sscratch, sp
     mv sp, a1
 #else
-    # LAB14 TODO 4 (exercise):
+    # LAB14 TODO 2 (exercise):
     #   1. write the ELF entry in a0 to sepc;
     #   2. clear sstatus.SPP;
     #   3. save the kernel sp in sscratch;

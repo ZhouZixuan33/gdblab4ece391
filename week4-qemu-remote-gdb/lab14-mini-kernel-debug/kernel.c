@@ -41,12 +41,11 @@ static u64 read_sepc(void) {
     return value;
 }
 
-__attribute__((noinline))
 void elf_load_done(void) {
     __asm__ volatile("" : : : "memory");
 }
 
-__attribute__((noreturn, noinline))
+__attribute__((noreturn))
 void kernel_exit_success(void) {
     uart_puts("[U] probe returned\n");
     uart_puts("[S] user exit: 0\n");
@@ -55,7 +54,7 @@ void kernel_exit_success(void) {
         __asm__ volatile("wfi");
 }
 
-__attribute__((noreturn, noinline))
+__attribute__((noreturn))
 void kernel_exit_failure(void) {
     uart_puts("[S] user exit reported failure\n");
     uart_puts("LAB14 FAIL\n");
@@ -82,7 +81,7 @@ void kernel_unexpected_trap(void) {
         __asm__ volatile("wfi");
 }
 
-__attribute__((noreturn, noinline))
+__attribute__((noreturn))
 void supervisor_entry(void) {
     u64 image_size = (u64)(embedded_user_elf_end - embedded_user_elf_start);
     int status;
@@ -92,10 +91,10 @@ void supervisor_entry(void) {
     uart_puts("[S] kernel\n");
 
 #if LAB14_SOLUTION
-    /* Reference solution for LAB14 TODO 3. */
+    /* Reference solution for LAB14 TODO 1. */
     write_stvec((u64)supervisor_trap_entry);
 #else
-    /* LAB14 TODO 3 (exercise): install supervisor_trap_entry in stvec. */
+    /* LAB14 TODO 1 (exercise): install supervisor_trap_entry in stvec. */
     write_stvec(0);
 #endif
 

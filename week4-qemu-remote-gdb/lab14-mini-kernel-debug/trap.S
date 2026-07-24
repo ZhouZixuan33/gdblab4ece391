@@ -39,13 +39,13 @@ supervisor_trap_entry:
 
 handle_probe:
 #if LAB14_SOLUTION
-    # Reference solution for LAB14 TODO 5.
+    # Reference solution for LAB14 TODO 3.
     ld t0, 48(sp)
     addi t0, t0, 4
     csrw sepc, t0
     li a0, PROBE_OK
 #else
-    # LAB14 TODO 5 (exercise): advance sepc over the 32-bit ecall and return
+    # LAB14 TODO 3 (exercise): advance sepc over the 32-bit ecall and return
     # PROBE_OK in a0. This placeholder deliberately repeats the ecall.
     li a0, 0
 #endif
