@@ -40,6 +40,10 @@ done_preserve:
     .globl broken_helper
     .type broken_helper, @function
 broken_helper:
+    addi sp, sp, -16
+    sd s1, 8(sp)
     li s1, 0x0badc0de       # BUG: s1 is callee-saved, but this function does not restore it.
     li a0, 7                # Put return value 7 in a0.
+    ld s1, 8(sp)
+    addi sp, sp, 16
     ret                     # Return without fixing s1.
