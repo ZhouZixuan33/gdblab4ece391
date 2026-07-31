@@ -34,7 +34,9 @@ static void enable_uart_external_interrupt(void) {
     __asm__ volatile("csrs sie, %0" : : "r"(SIE_SEIE));
 #else
     /* LAB15 TODO 4 (exercise): enable UART, PLIC, and sie.SEIE. */
+    plic_enable_uart();
     uart_enable_receive_interrupt();
+    __asm__ volatile("csrs sie, %0" : : "r"(SIE_SEIE));
 #endif
 }
 
@@ -70,10 +72,22 @@ void handle_external_interrupt(void) {
      */
     source = plic_claim();
     lab15_last_claim = source;
+    if (source != UART0_IRQ)
+        kernel_unexpected_trap((struct trap_frame *)0);
+
     byte = uart_receive_interrupt();
-    if (source == UART0_IRQ && byte >= 0) {
-        USER_IRQ_BYTE = (u64)(unsigned int)byte;
-    }
+    if (byte < 0)
+        kernel_unexpected_trap((struct trap_frame *)0);
+
+    lab15_last_uart_byte = (u64)(unsigned int)byte;
+    USER_IRQ_BYTE = (u64)(unsigned int)byte;
+    USER_IRQ_FLAG = 1;
+
+    uart_puts("[S] UART interrupt: source 10\n");
+    uart_puts("[S] received: ");
+    uart_putchar((char)byte);
+    uart_putchar('\n');
+    plic_complete(source);
 #endif
 }
 
@@ -102,6 +116,14 @@ void supervisor_trap_dispatch(struct trap_frame *frame) {
      * LAB15 TODO 3 (exercise): inspect the interrupt bit and cause code,
      * then dispatch ecall or supervisor external interrupt.
      */
+    if ((frame->scause & SCAUSE_INTERRUPT) != 0) {
+        if (code == SCAUSE_EXTERNAL_S) {
+            handle_external_interrupt();
+            return;
+        }
+        kernel_unexpected_trap(frame);
+    }
+
     if (code != SCAUSE_ECALL_U)
         kernel_unexpected_trap(frame);
 #endif

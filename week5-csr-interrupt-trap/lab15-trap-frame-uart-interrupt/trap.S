@@ -24,7 +24,7 @@ supervisor_trap_entry:
     sd s1, TF_S1(sp)
 #else
     # LAB15 TODO 1 (exercise): save s1 in its own trap-frame slot.
-    sd zero, TF_S1(sp)
+    sd s1, TF_S1(sp)
 #endif
     sd a0, TF_A0(sp)
     sd a1, TF_A1(sp)
@@ -65,7 +65,7 @@ trap_frame_saved:
     mv a0, sp
 #else
     # LAB15 TODO 2 (exercise): pass the trap-frame base address in a0.
-    addi a0, sp, TF_SIZE
+    mv a0, sp
 #endif
     call supervisor_trap_dispatch
 
@@ -86,7 +86,7 @@ trap_frame_saved:
     ld s1, TF_S1(sp)
 #else
     # LAB15 TODO 6 (exercise): restore s1 from TF_S1, not TF_S0.
-    ld s1, TF_S0(sp)
+    ld s1, TF_S1(sp)
 #endif
     ld a0, TF_A0(sp)
     ld a1, TF_A1(sp)
