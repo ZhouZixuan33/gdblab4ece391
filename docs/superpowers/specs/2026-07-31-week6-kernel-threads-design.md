@@ -1,0 +1,511 @@
+# Week 6 内核线程实验教学设计
+
+## 1. 定位与范围
+
+本组实验对应 ECE391-L7、L8、L9，使用现有 QEMU `virt`、RV64 裸机内核和 GDB remote debugging 环境，不使用 Linux `pthread`。三个实验分别回答：
+
+1. Lab 16：CPU 如何从一个线程切换到另一个线程；
+2. Lab 17：内核如何创建、调度和结束线程；
+3. Lab 18：并发执行流如何安全访问共享状态。
+
+每个实验预计 1–2 小时。Week 5 的 boot、UART、trap 和链接基础设施作为框架复用。学生不从零编写完整线程库，而是完成决定概念正确性的关键代码，并通过 GDB 收集证据。
+
+本组实验不包含：
+
+- Linux `pthread`；
+- timer-driven preemption；
+- 多 hart 调度；
+- 多核 memory ordering；
+- 页表和进程地址空间；
+- 完整用户进程系统；
+- 高性能 spinlock；
+- deadlock detection；
+- nested interrupt。
+
+Condition variable 作为 Lab 18 Challenge，不属于必做路径。
+
+## 2. 教学方法
+
+三个实验统一采用以下流程：
+
+1. 学生先预测运行结果和状态变化；
+2. 运行包含确定性故障的 exercise；
+3. 在稳定 checkpoint 停下；
+4. 使用 GDB 检查寄存器、线程结构、栈和队列；
+5. 修改少量关键 TODO；
+6. 重新运行并解释修复的因果链；
+7. 使用自动脚本验证多轮执行结果。
+
+故障必须可重复、可定位，不依赖偶然时序或不可解释的随机崩溃。
+
+## 3. 重要概念与掌握程度
+
+| 概念 | 必须理解 | 必须实操 | 不要求 |
+|---|---|---|---|
+| Program/process/thread | 同一进程的线程共享代码、静态区和堆，但各有寄存器与栈 | 区分两个线程的 `sp`、栈和执行位置 | 地址空间隔离 |
+| Thread context | 恢复后应像未被暂停 | 检查 `ra`、`sp`、`s0-s11` | FP/vector context |
+| Calling convention | cooperative `_swtch()` 重点保存 callee-saved registers | 对照 C layout 补全 `sd/ld` | 背诵全部 ABI |
+| Context switch | 保存 A、切换 `tp`、恢复 B、`ret` 到 B | 证明“A 调用、B 返回” | timer preemption |
+| 独立线程栈 | 切换 `sp` 即切换调用链 | 验证 stack range | guard page |
+| 首次启动 | 新线程需要人工构造初始 context | 设置 `sp`、trampoline 和参数 | 完整通用 varargs |
+| Round-Robin | 队首取下一个，yield 线程入队尾 | 跟踪 `A→B→C→A` | priority/aging |
+| Thread state | WAITING/EXITED 不可被调度 | 验证状态转换 | 完整资源回收 |
+| Race condition | C 语句可能是多条机器指令 | 重现并解释 lost update | 形式化证明 |
+| Critical section | 围绕共享不变量定义 | 找出最小正确临界区 | lock-free algorithm |
+| Lock | 保证 thread-thread mutual exclusion | 修复 race 并验证 owner | 高性能多核锁 |
+| Interrupt masking | 保存旧状态、关闭、恢复，处理 thread-ISR 并发 | 编写 CSR helper | SMP interrupt coordination |
+| Condition variable | wait 移出 ready queue，broadcast 使其 READY | Challenge 中跟踪 wait/broadcast | 必做完整实现 |
+| Deadlock | 能识别持锁等待和锁顺序问题 | 识别简单故障 | 检测与恢复 |
+
+## 4. ECE391 代码能力要求
+
+| 模块 | 学生最终应达到的代码能力 |
+|---|---|
+| `struct thread_context` | 独立定义 `ra`、`sp`、`s0-s11`，保证 C/汇编 offset 一致 |
+| `_swtch()` | 在给定 ABI 和 layout 后，独立完成保存、切换 `tp`、恢复和 `ret` |
+| `struct thread` | 使用 context、stack、state、id、parent 和 list link |
+| `thread_spawn()` | 分配 entry/stack，构造初始 context，将线程加入 ready queue |
+| Thread trampoline | 解释并补全“首次 restore→thread function→thread_exit” |
+| `thread_yield()` | 完成 READY/RUNNING 转换和 RR 入队、出队 |
+| `thread_exit()` | 标记 EXITED、唤醒等待者并永久切走 |
+| RR scheduler | 独立实现最小 FIFO ready queue 调度 |
+| Condition wait/broadcast | 在给定接口和 interrupt 规则后补全核心状态转换 |
+| Lock | 定义 owner/waiters，补全 acquire/release |
+| Interrupt critical section | 独立实现 save-disable-restore |
+| 并发测试 | 编写共享状态测试和可检查的不变量 |
+| 调试 | 设置 checkpoint/sentinel，用 GDB 验证机器状态 |
+
+“应能编写”不代表每段代码都必须在短实验中从零完成。实验选择关键片段让学生实际编写，其余通过阅读、调试和 Review Questions 考核。
+
+# Lab 16：线程现场与 `_swtch()`
+
+## 5. 核心问题与目标
+
+核心问题：
+
+> 单个 CPU 怎样在两个线程之间切换，并让每个线程认为自己的函数调用从未被打断？
+
+预计时间 75–110 分钟。完成后学生应能够：
+
+- 区分 thread context 与 trap frame；
+- 解释 cooperative switch 保存 `ra`、`sp`、`s0-s11` 的原因；
+- 将 `struct thread_context` 字段与汇编 offset 对应；
+- 观察 `tp`、`sp`、`ra` 的切换；
+- 验证两个线程使用独立栈；
+- 解释 A 调用的 `_swtch()` 为什么能在 B 中返回；
+- 修复保存/恢复不对称。
+
+## 6. 学生 TODO 与框架边界
+
+| TODO | 文件 | 任务 |
+|---|---|---|
+| 1 | `thread.h` | 补全 `thread_context` 的 `ra`、`sp`、`s0-s11` |
+| 2 | `swtch.S` | 通过旧 `tp` 保存当前 `ra` 和 `sp` |
+| 3 | `swtch.S` | 保存 `s0-s11` |
+| 4 | `swtch.S` | 将 `tp` 更新为目标线程 |
+| 5 | `swtch.S` | 通过新 `tp` 恢复 `ra`、`sp`、`s0-s11` |
+| 6 | `swtch.S` | 返回到目标线程的旧执行点 |
+
+框架提供 boot、linker、UART、trap、scheduler、thread allocator 和两个已构造 context 的线程。Lab 16 不处理线程首次启动。
+
+建议结构：
+
+```c
+struct thread_context {
+    uint64_t ra;
+    uint64_t sp;
+    uint64_t s[12];
+};
+```
+
+汇编使用共享 offset 常量 `CTX_RA`、`CTX_SP`、`CTX_S0` 至 `CTX_S11`、`CTX_SIZE`。构建期必须验证 C layout 与汇编常量一致。
+
+## 7. 执行路径与故障
+
+```text
+A calls _swtch(B)
+  → use old tp to save A
+  → tp = B
+  → use new tp to restore B
+  → ret uses B.ra
+  → B's earlier _swtch call returns
+```
+
+确定性故障：
+
+1. `sp` 被保存到错误 slot，切回 A 时 stack range 检查失败；
+2. `s1` 保存和恢复 offset 不对称，sentinel 检查失败；
+3. 过早更新 `tp`，导致 A 的现场写入 B 的 context。
+
+正确顺序必须是：
+
+```text
+用旧 tp 保存 current
+→ 更新 tp
+→ 用新 tp 恢复 next
+```
+
+## 8. GDB 证据与验收
+
+稳定 checkpoints：
+
+```text
+thread_a_before_switch
+swtch_save_done
+swtch_tp_changed
+swtch_restore_done
+thread_b_after_switch
+thread_a_after_resume
+context_corruption
+```
+
+学生记录每个 checkpoint 的 `tp`、`sp` 所属栈、`ra` 和 backtrace。关键证据是 `_swtch()` 可以经历 `tp` 已指向 B、`sp` 暂时仍属于 A 的短暂阶段。
+
+自动验收：
+
+- C/汇编 layout 一致；
+- save/restore offset 对称；
+- 更新 `tp` 前已保存当前现场；
+- A/B 严格交替；
+- `sp` 始终处于正确 stack range；
+- `s0-s11` sentinels 保持；
+- 至少完成 100 次 context switch；
+- 输出 `LAB16 PASS`。
+
+时间分配：
+
+```text
+概念预测                    10–15 分钟
+第一次 GDB 跟踪             20–25 分钟
+修复 save/restore           25–35 分钟
+验证栈与返回路径             15–20 分钟
+复习题                      10–15 分钟
+```
+
+# Lab 17：首次启动、Round-Robin 与生命周期
+
+## 9. 核心问题与目标
+
+核心问题：
+
+> 一个从未运行过的线程没有旧现场，内核怎样让它第一次被调度时像普通函数一样开始执行，并在函数返回后安全退出？
+
+预计时间 90–120 分钟。学生应能：
+
+- 为新线程分配独立且 ABI 对齐的栈；
+- 构造初始 `sp`、`ra` 和 trampoline 参数；
+- 实现 FIFO Round-Robin；
+- 跟踪 RUNNING、READY、WAITING、EXITED；
+- 实现不返回的 `thread_exit()`；
+- 解释 idle thread 的作用。
+
+## 10. 学生 TODO 与框架边界
+
+| TODO | 文件 | 任务 |
+|---|---|---|
+| 1 | `thread.c` | 分配空闲 `thrtab[]` entry |
+| 2 | `thread.c` | 设置 stack anchor 并完成 16-byte ABI 对齐 |
+| 3 | `thread.c` | 构造初始 `ra`、`sp` 和 trampoline 参数 |
+| 4 | `thread_setup.S` | 取入口函数和参数并调用 |
+| 5 | `thread.c` | 实现 `thread_yield()` 的 RR 队列与状态转换 |
+| 6 | `thread.c` | 实现 `thread_exit()` 并切换到下一个线程 |
+| 7 | `thread.c` | 阻止 EXITED 线程重新进入 ready queue |
+
+框架提供 Lab 16 的正确 `_swtch()`、固定容量 thread table、stack storage、ready-list primitives、测试线程、main 和 idle 初始结构。
+
+入口统一为：
+
+```c
+void thread_function(void *arg);
+```
+
+不要求学生处理任意 varargs。
+
+## 11. 首次启动与调度
+
+```text
+thread_spawn(fn, arg)
+  → allocate entry and stack
+  → context.sp = aligned stack top
+  → context.ra = thread_setup
+  → state = READY
+  → insert at ready-list tail
+
+first dispatch
+  → _swtch restores artificial context
+  → ret to thread_setup
+  → call fn(arg)
+  → fn returns
+  → thread_exit
+  → mark EXITED and switch away permanently
+```
+
+Round-Robin 规则：
+
+```text
+running A, ready [B, C, D]
+  → A RUNNING→READY
+  → insert A at tail
+  → remove B from head
+  → B READY→RUNNING
+  → _swtch(B)
+```
+
+若 ready list 为空，当前非退出线程继续运行；退出线程必须切到普通 READY 线程或 idle。idle 永不退出，只在没有普通 READY 线程时运行。
+
+## 12. 确定性故障
+
+1. 新线程 `ra` 直接指向 worker，worker 返回后无合法 caller；
+2. stack top 未按 16 字节对齐，由 trampoline 入口显式检查；
+3. yield 把当前线程插入队首，产生 `A1 A2 A3 B1...` 而非 RR；
+4. EXITED 线程重新入队，scheduler 在 `scheduler_selected_nonready_thread` 停止。
+
+测试运行三个 worker，迭代次数分别为 3、2、1，并用结构化事件日志验证调度顺序。
+
+## 13. GDB 证据与验收
+
+稳定 checkpoints：
+
+```text
+thread_created
+thread_first_dispatch
+thread_setup_entry
+scheduler_before_switch
+scheduler_after_select
+thread_function_returned
+thread_marked_exited
+scheduler_selected_nonready_thread
+```
+
+学生验证：
+
+- 新线程 `sp` 在自己的 stack range 且 16-byte aligned；
+- 初始 `ra == thread_setup`；
+- 新线程创建后为 READY；
+- ready queue 始终遵循 FIFO；
+- 每个线程首次入口和 exit 各发生一次。
+
+自动验收：
+
+- 至少 20 次合计切换；
+- RR 事件日志顺序正确；
+- 每个线程只使用自己的栈；
+- EXITED 线程不再调度；
+- main 和 idle 生命周期合法；
+- 输出 `LAB17 PASS`。
+
+时间分配：
+
+```text
+预测首次启动路径             10–15 分钟
+检查初始 context             15–20 分钟
+修复 stack/trampoline        25–30 分钟
+实现 RR yield                25–30 分钟
+修复 exit                    15–20 分钟
+验收与复习题                 10–15 分钟
+```
+
+# Lab 18：Race、Lock 与 Interrupt Critical Section
+
+## 14. 核心问题与目标
+
+核心问题：
+
+> 两个线程都正确执行自己的 C 代码，为什么共享结果仍然会错？锁与关闭中断分别阻止了谁？
+
+预计时间 90–120 分钟。必做部分分为：
+
+1. 确定性重现 lost update；
+2. 用阻塞式 lock 修复 thread-thread race；
+3. 用 interrupt save-disable-restore 保护 thread-ISR 共享状态。
+
+学生应能识别共享不变量、确定最小正确临界区、解释 cooperative race、避免持锁 busy-spin，并区分 lock 与 interrupt masking。
+
+## 15. Part A：确定性 Lost Update
+
+两个 worker 各执行 `N` 次：
+
+```c
+uint64_t value = shared_counter;
+thread_yield();
+shared_counter = value + 1;
+```
+
+`N=3` 时，A/B 在每次 load 与 store 间交错，期望值为 6，实际值稳定为 3。显式 yield 用于把合法 interleaving 变成可重复实验，不代表真实 race 必须显式 yield。
+
+学生 TODO：
+
+| TODO | 文件 | 任务 |
+|---|---|---|
+| 1 | `race.c` | 标出共享数据和不变量 |
+| 2 | `race.c` | 补全显式 load-modify-store |
+| 3 | `race.c` | 记录 load/store、thread ID 和数值 |
+| 4 | README worksheet | 写出导致 lost update 的 interleaving |
+
+稳定 checkpoints 为 `counter_loaded`、`counter_before_store`、`counter_stored`、`counter_final_check`。学生必须证明哪个 store 覆盖了哪个更新，再进入修复阶段。
+
+## 16. Part B：阻塞式 Lock
+
+最小接口：
+
+```c
+struct lock {
+    struct thread *owner;
+    struct condition released;
+};
+
+void lock_init(struct lock *lock);
+void lock_acquire(struct lock *lock);
+void lock_release(struct lock *lock);
+```
+
+必做路径由框架提供已验证的 `condition_wait()` 和 `condition_broadcast()`，学生在 Part B 调用并理解其语义，但不实现 condition 内部队列。Condition Variable Challenge 才要求学生补全 condition 的核心状态转换。因此必做 lock 不依赖学生先完成挑战题。
+
+学生 TODO：
+
+| TODO | 文件 | 任务 |
+|---|---|---|
+| 5 | `lock.c` | 初始化 owner 和等待条件 |
+| 6 | `lock.c` | 用 `while` 等待并设置 owner |
+| 7 | `lock.c` | 检查 owner、释放并 broadcast |
+| 8 | `race.c` | 用一个临界区覆盖完整 read-modify-write |
+| 9 | `lock.c` | 拒绝 non-owner release |
+| 10 | `lock.c` | 避免单核持锁 busy-spin |
+
+错误修复只分别锁住 load 和 store，仍会 lost update。正确临界区必须覆盖完整不变量：
+
+```c
+lock_acquire(&counter_lock);
+value = shared_counter;
+thread_yield();
+shared_counter = value + 1;
+lock_release(&counter_lock);
+```
+
+保留临界区内 yield，用来证明正确性来自 mutual exclusion。
+
+等待条件必须使用 `while`。broadcast 只说明状态可能改变；被唤醒线程实际恢复时，其他线程可能已重新持锁。
+
+确定性故障：
+
+1. 临界区过小；
+2. `if` 代替 `while`，三个等待者被唤醒后违反互斥；
+3. release 不检查 owner；
+4. 单核 busy-spin 使 owner 永远无法恢复。
+
+## 17. Part C：线程与 ISR
+
+共享状态：
+
+```c
+volatile uint64_t event_count;
+volatile uint64_t event_checksum;
+```
+
+不变量：
+
+```text
+event_checksum == checksum(event_count)
+```
+
+普通 thread lock 不能自动阻止 ISR。ISR 若获取一个被被中断线程持有的阻塞锁，会等待无法恢复的 owner，形成死锁。
+
+接口：
+
+```c
+typedef uint64_t irq_state_t;
+irq_state_t irq_save_disable(void);
+void irq_restore(irq_state_t previous);
+```
+
+学生 TODO：
+
+| TODO | 文件 | 任务 |
+|---|---|---|
+| 11 | `irq.h` | 定义 interrupt state 类型和接口 |
+| 12 | `irq.c` | 原子读取并清除 `sstatus.SIE` |
+| 13 | `irq.c` | 按保存值恢复原状态 |
+| 14 | `event.c` | 保护两个共享字段 |
+| 15 | `event.c` | 保证所有退出路径都恢复状态 |
+
+故障一在退出时无条件 enable；测试从 SIE 已关闭的外层调用进入，要求退出后仍关闭。故障二在更新两个字段中间安排 pending interrupt，使 ISR 稳定观察到不变量破坏。
+
+## 18. Lab 18 验收
+
+Part A：
+
+- unsafe 版本稳定重现 lost update；
+- 日志包含两个线程读取同一旧值；
+- 学生提交准确 interleaving。
+
+Part B：
+
+- 2–3 个线程各执行至少 1,000 次更新；
+- 临界区内保留 yield；
+- 同时进入临界区的线程数永不超过 1；
+- non-owner release 被拒绝；
+- 无 starvation 或 hang；
+- counter 精确等于期望值。
+
+Part C：
+
+- ISR 不观察到不一致的成对字段；
+- SIE 初始开启时正确恢复为开启；
+- SIE 初始关闭时正确恢复为关闭；
+- nested save/restore 顺序正确；
+- 所有失败路径恢复旧状态。
+
+最终输出：
+
+```text
+[Part A] deterministic race observed
+[Part B] lock preserves counter
+[Part B] mutual exclusion verified
+[Part C] ISR invariant preserved
+[Part C] interrupt state restored
+LAB18 PASS
+```
+
+时间分配：
+
+```text
+Part A 观察并解释 race          20–25 分钟
+Part B 实现/修复 lock           35–45 分钟
+Part B GDB 与压力验证           15–20 分钟
+Part C interrupt state          20–25 分钟
+复习题                          5–10 分钟
+```
+
+## 19. Condition Variable Challenge
+
+使用容量为 1 的 mailbox 进行 producer-consumer。学生补全：
+
+```text
+condition_wait(cond, lock):
+  将 current 加入 cond wait list
+  current → WAITING
+  原子地释放 lock 并切换
+  被 broadcast 唤醒
+  重新 acquire lock
+  返回后由 while 重查条件
+```
+
+Challenge 的重点是解释为什么“先 release，再加入 wait list”会 lost wakeup。预计额外 30–45 分钟。
+
+## 20. 三实验能力闭环
+
+```text
+Lab 16：保存和恢复 CPU context
+    ↓
+理解线程切换的机器级机制
+    ↓
+Lab 17：构造初始 context、ready queue 和 lifecycle
+    ↓
+建立最小 cooperative threading system
+    ↓
+Lab 18：race、lock 和 interrupt exclusion
+    ↓
+维护并发内核中的共享状态
+```
+
+完成后，学生既能阅读 ECE391 线程框架，也能独立编写最小 cooperative context switch、线程创建/调度/退出、基本 lock 和 interrupt critical section，并能用 GDB 从机器状态证明实现正确。
