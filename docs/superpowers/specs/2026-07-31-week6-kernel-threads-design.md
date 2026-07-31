@@ -408,9 +408,9 @@ README 概念与流程预测         15–20 分钟
 
 预计时间 90–120 分钟。必做部分分为：
 
-1. 确定性重现 lost update；
-2. 用阻塞式 lock 修复 thread-thread race；
-3. 用 interrupt save-disable-restore 保护 thread-ISR 共享状态。
+1. 观察未同步线程的确定性 lost update；
+2. 对照观察正确阻塞式 lock 如何改变线程状态和调度；
+3. 对照观察 interrupt masking 如何保护 thread-ISR 共享状态。
 
 学生应能识别共享不变量、确定最小正确临界区、解释 cooperative race、避免持锁 busy-spin，并区分 lock 与 interrupt masking。
 
@@ -426,16 +426,15 @@ shared_counter = value + 1;
 
 `N=3` 时，A/B 在每次 load 与 store 间交错，期望值为 6，实际值稳定为 3。显式 yield 用于把合法 interleaving 变成可重复实验，不代表真实 race 必须显式 yield。
 
-学生 TODO：
+未同步基线由框架完整提供，不要求学生先修复代码。学生任务是收集证据：
 
-| TODO | 文件 | 任务 |
+| 观察任务 | 文件 | 任务 |
 |---|---|---|
-| 1 | `race.c` | 标出共享数据和不变量 |
-| 2 | `race.c` | 补全显式 load-modify-store |
-| 3 | `race.c` | 记录 load/store、thread ID 和数值 |
-| 4 | README worksheet | 写出导致 lost update 的 interleaving |
+| 1 | README worksheet | 标出共享数据、线程私有数据和期望不变量 |
+| 2 | GDB/事件日志 | 记录 load/store、thread ID、local value 和 shared value |
+| 3 | README worksheet | 写出导致 lost update 的完整 interleaving |
 
-稳定 checkpoints 为 `counter_loaded`、`counter_before_store`、`counter_stored`、`counter_final_check`。学生必须证明哪个 store 覆盖了哪个更新，再进入修复阶段。
+稳定 checkpoints 为 `counter_loaded`、`counter_before_store`、`counter_stored`、`counter_final_check`。学生必须证明哪个 store 覆盖了哪个更新，再进入同步机制。
 
 ## 16. Part B：阻塞式 Lock
 
@@ -452,18 +451,37 @@ void lock_acquire(struct lock *lock);
 void lock_release(struct lock *lock);
 ```
 
-必做路径由框架提供已验证的 `condition_wait()` 和 `condition_broadcast()`，学生在 Part B 调用并理解其语义，但不实现 condition 内部队列。Condition Variable Challenge 才要求学生补全 condition 的核心状态转换。因此必做 lock 不依赖学生先完成挑战题。
+必做路径由框架提供已验证的 `lock_init()`、`condition_wait()`、`condition_broadcast()` 和 owner-violation checkpoint。学生阅读这些代码，并在 Part B 调用 condition helper，但不实现 condition 内部队列。Condition Variable Challenge 才要求学生补全 condition 的核心状态转换。因此必做 lock 不依赖学生先完成挑战题。
 
-学生 TODO：
+Part B 先运行正确 lock reference。即使 A 在临界区内 yield，B 也不能进入同一临界区：
+
+```text
+A acquire
+→ A enters critical section
+→ A yields while holding lock
+→ B tries acquire
+→ B becomes WAITING
+→ A resumes and releases
+→ B becomes READY
+→ B resumes, rechecks and acquires
+```
+
+学生先填写真实状态表：
+
+| Checkpoint | running | lock owner | B state | ready queue | counter |
+|---|---|---|---|---|---:|
+| A acquired | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| B waits | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| A releases | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| B acquired | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+
+观察后再补全少量关键代码：
 
 | TODO | 文件 | 任务 |
 |---|---|---|
-| 5 | `lock.c` | 初始化 owner 和等待条件 |
-| 6 | `lock.c` | 用 `while` 等待并设置 owner |
-| 7 | `lock.c` | 检查 owner、释放并 broadcast |
-| 8 | `race.c` | 用一个临界区覆盖完整 read-modify-write |
-| 9 | `lock.c` | 拒绝 non-owner release |
-| 10 | `lock.c` | 避免单核持锁 busy-spin |
+| 1 | `lock.c` | 用 `while`、框架 condition helper 和 owner 补全 acquire |
+| 2 | `lock.c` | 清除 owner、broadcast 并补全 release |
+| 3 | `race.c` | 用一个临界区覆盖完整 read-modify-write |
 
 错误修复只分别锁住 load 和 store，仍会 lost update。正确临界区必须覆盖完整不变量：
 
@@ -479,12 +497,7 @@ lock_release(&counter_lock);
 
 等待条件必须使用 `while`。broadcast 只说明状态可能改变；被唤醒线程实际恢复时，其他线程可能已重新持锁。
 
-确定性故障：
-
-1. 临界区过小；
-2. `if` 代替 `while`，三个等待者被唤醒后违反互斥；
-3. release 不检查 owner；
-4. 单核 busy-spin 使 owner 永远无法恢复。
+本实验不预埋临界区过小、`if` 代替 `while`、non-owner release 或 busy-spin 等错误。这些反例放在 README 中作为代码片段和预测题，并由自动测试检查最终实现的安全性质。教师可选择其中一个作为额外 Challenge。
 
 ## 17. Part C：线程与 ISR
 
@@ -503,6 +516,36 @@ event_checksum == checksum(event_count)
 
 普通 thread lock 不能自动阻止 ISR。ISR 若获取一个被被中断线程持有的阻塞锁，会等待无法恢复的 owner，形成死锁。
 
+Part C 先运行未保护基线：
+
+```text
+thread updates event_count
+→ interrupt arrives before checksum update
+→ ISR reads the pair
+→ ISR observes a broken invariant
+```
+
+再运行正确 reference：
+
+```text
+save old SIE
+→ clear SIE
+→ update both fields
+→ restore old SIE
+→ pending ISR executes
+→ ISR observes a consistent pair
+```
+
+学生记录：
+
+| Checkpoint | `sstatus.SIE` | interrupt pending | `event_count` | `event_checksum` | invariant |
+|---|---:|---:|---:|---:|---|
+| before critical section | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| after SIE clear | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| between two updates | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| after restore | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| ISR entry | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+
 接口：
 
 ```c
@@ -515,13 +558,11 @@ void irq_restore(irq_state_t previous);
 
 | TODO | 文件 | 任务 |
 |---|---|---|
-| 11 | `irq.h` | 定义 interrupt state 类型和接口 |
-| 12 | `irq.c` | 原子读取并清除 `sstatus.SIE` |
-| 13 | `irq.c` | 按保存值恢复原状态 |
-| 14 | `event.c` | 保护两个共享字段 |
-| 15 | `event.c` | 保证所有退出路径都恢复状态 |
+| 4 | `irq.c` | 原子读取并清除 `sstatus.SIE` |
+| 5 | `irq.c` | 按保存值恢复原 interrupt state |
+| 6 | `event.c` | 用一个 interrupt critical section 保护两个共享字段 |
 
-故障一在退出时无条件 enable；测试从 SIE 已关闭的外层调用进入，要求退出后仍关闭。故障二在更新两个字段中间安排 pending interrupt，使 ISR 稳定观察到不变量破坏。
+未保护基线会在两个字段更新之间安排 pending interrupt，这是需要观察的真实 thread-ISR interleaving，不是排错任务。退出时无条件 enable、遗漏恢复和 ISR 获取阻塞锁改为 README 推理题，不作为预埋故障。
 
 ## 18. Lab 18 验收
 
@@ -538,7 +579,8 @@ Part B：
 - 同时进入临界区的线程数永不超过 1；
 - non-owner release 被拒绝；
 - 无 starvation 或 hang；
-- counter 精确等于期望值。
+- counter 精确等于期望值；
+- reference 与学生完成版产生相同的 owner/waiter 状态转换。
 
 Part C：
 
@@ -546,7 +588,8 @@ Part C：
 - SIE 初始开启时正确恢复为开启；
 - SIE 初始关闭时正确恢复为关闭；
 - nested save/restore 顺序正确；
-- 所有失败路径恢复旧状态。
+- 所有退出路径恢复旧状态；
+- reference 与学生完成版产生相同的 interrupt-state 转换。
 
 最终输出：
 
@@ -562,11 +605,12 @@ LAB18 PASS
 时间分配：
 
 ```text
-Part A 观察并解释 race          20–25 分钟
-Part B 实现/修复 lock           35–45 分钟
-Part B GDB 与压力验证           15–20 分钟
-Part C interrupt state          20–25 分钟
-复习题                          5–10 分钟
+README：共享状态与不变量         10–15 分钟
+Part A 观察并解释 race           15–20 分钟
+Part B 观察 lock 状态流          15–20 分钟
+Part B 补全并验证 lock           20–25 分钟
+Part C 对照观察并补全 IRQ        20–25 分钟
+复习题                           5–10 分钟
 ```
 
 ## 19. Condition Variable Challenge
