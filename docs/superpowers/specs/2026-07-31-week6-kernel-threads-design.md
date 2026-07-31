@@ -26,7 +26,7 @@ Condition variable 作为 Lab 18 Challenge，不属于必做路径。
 
 ## 2. 教学方法
 
-三个实验都要求学生先建立运行模型，再接触代码。Lab 16 和 Lab 18 使用确定性故障帮助暴露 context corruption 与 race；Lab 17 使用可运行的正确基线，以流程观察为主，不人为制造调度错误。
+三个实验都要求学生先建立运行模型，再接触代码。Lab 16 和 Lab 17 使用可运行的正确基线，以流程和真实数据观察为主；Lab 18 使用确定性 interleaving 暴露 race，因为“观察到错误结果并解释交错”本身就是该实验的核心概念。
 
 1. 学生先预测运行结果和状态变化；
 2. 运行 reference 或 exercise，获得可重复的基线现象；
@@ -93,20 +93,29 @@ Condition variable 作为 Lab 18 Challenge，不属于必做路径。
 - 观察 `tp`、`sp`、`ra` 的切换；
 - 验证两个线程使用独立栈；
 - 解释 A 调用的 `_swtch()` 为什么能在 B 中返回；
-- 修复保存/恢复不对称。
+- 根据观察到的流程实现对称的保存与恢复。
 
-## 6. 学生 TODO 与框架边界
+## 6. 观察优先的任务与框架边界
+
+Lab 16 先提供可直接运行的正确 reference。学生在修改代码前完整观察两次切换：
+
+```text
+A → _swtch → B
+B → _swtch → A
+```
+
+reference 与 exercise 使用相同的结构体布局、checkpoint 和测试线程，便于把观察到的数据直接用于实现。学生先完成观察表，再进入代码补全。
 
 | TODO | 文件 | 任务 |
 |---|---|---|
 | 1 | `thread.h` | 补全 `thread_context` 的 `ra`、`sp`、`s0-s11` |
-| 2 | `swtch.S` | 通过旧 `tp` 保存当前 `ra` 和 `sp` |
-| 3 | `swtch.S` | 保存 `s0-s11` |
-| 4 | `swtch.S` | 将 `tp` 更新为目标线程 |
-| 5 | `swtch.S` | 通过新 `tp` 恢复 `ra`、`sp`、`s0-s11` |
-| 6 | `swtch.S` | 返回到目标线程的旧执行点 |
+| 2 | `swtch.S` | 用旧 `tp` 保存当前 `ra`、`sp`、`s0-s11` |
+| 3 | `swtch.S` | 在保存完成后将 `tp` 更新为目标线程 |
+| 4 | `swtch.S` | 用新 `tp` 恢复 context 并 `ret` |
 
-框架提供 boot、linker、UART、trap、scheduler、thread allocator 和两个已构造 context 的线程。Lab 16 不处理线程首次启动。
+TODO 按 context switch 的三个逻辑阶段组织，不预埋错误 offset。未完成时程序停在明确的 `lab16_todo_checkpoint()`，不允许带着不完整 context 继续运行。
+
+框架提供 boot、linker、UART、trap、scheduler、thread allocator、两个已构造 context 的线程以及正确 reference。Lab 16 不处理线程首次启动。
 
 建议结构：
 
@@ -120,7 +129,18 @@ struct thread_context {
 
 汇编使用共享 offset 常量 `CTX_RA`、`CTX_SP`、`CTX_S0` 至 `CTX_S11`、`CTX_SIZE`。构建期必须验证 C layout 与汇编常量一致。
 
-## 7. 执行路径与故障
+## 7. README 概念、执行路径与真实数据
+
+README 应重点说明：
+
+1. thread context 与 trap frame 的区别；
+2. RISC-V caller-saved 与 callee-saved registers；
+3. cooperative `_swtch()` 为什么保存 `ra`、`sp`、`s0-s11`；
+4. `tp` 表示当前线程身份，`sp` 表示当前调用链；
+5. context struct、汇编 offset 和实际内存之间的对应；
+6. 为什么 `_swtch()` 的 `ret` 可以进入另一个线程；
+7. 为什么从每个线程自身视角看，`_swtch()` 像普通函数返回；
+8. 为什么 save 与 restore 必须对称。
 
 ```text
 A calls _swtch(B)
@@ -131,12 +151,6 @@ A calls _swtch(B)
   → B's earlier _swtch call returns
 ```
 
-确定性故障：
-
-1. `sp` 被保存到错误 slot，切回 A 时 stack range 检查失败；
-2. `s1` 保存和恢复 offset 不对称，sentinel 检查失败；
-3. 过早更新 `tp`，导致 A 的现场写入 B 的 context。
-
 正确顺序必须是：
 
 ```text
@@ -144,6 +158,32 @@ A calls _swtch(B)
 → 更新 tp
 → 用新 tp 恢复 next
 ```
+
+README 提供两张待填写的观察表。
+
+### Context switch 阶段
+
+| Checkpoint | `tp` 指向 | `sp` 属于哪个栈 | `ra` 指向 | 当前 context memory |
+|---|---|---|---|---|
+| A before switch | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| save done | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| `tp` changed | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| restore done | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| B after `ret` | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+
+### 两个线程的独立状态
+
+| Thread | context address | stack range | saved `sp` | saved `ra` | `s0/s1` sentinels |
+|---|---:|---|---:|---:|---|
+| A | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| B | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+
+错误 offset 和过早更新 `tp` 不作为必做故障。README 将它们改为推理题：
+
+- 如果 save 与 restore 使用不同 slot，哪个线程的哪个值会在何时发生变化？
+- 如果先执行 `tp = next` 再保存，保存操作会写入谁的 context？
+
+教师可将第二题作为可选 Challenge，让学生临时改变一条指令并观察；它不进入必做验收。
 
 ## 8. GDB 证据与验收
 
@@ -156,16 +196,22 @@ swtch_tp_changed
 swtch_restore_done
 thread_b_after_switch
 thread_a_after_resume
-context_corruption
 ```
 
-学生记录每个 checkpoint 的 `tp`、`sp` 所属栈、`ra` 和 backtrace。关键证据是 `_swtch()` 可以经历 `tp` 已指向 B、`sp` 暂时仍属于 A 的短暂阶段。
+学生记录每个 checkpoint 的 `tp`、`sp` 所属栈、`ra`、context memory 和 backtrace。关键证据是：
+
+- save 完成后 A 的 context 与寄存器一致；
+- `_swtch()` 可以经历 `tp` 已指向 B、`sp` 暂时仍属于 A 的短暂阶段；
+- restore 后 `sp/ra/s0-s11` 都来自 B；
+- `ret` 后 B 的旧 `_swtch()` 调用返回；
+- B 切回 A 后，A 从原调用点继续。
 
 自动验收：
 
 - C/汇编 layout 一致；
 - save/restore offset 对称；
 - 更新 `tp` 前已保存当前现场；
+- reference 与学生完成版产生相同的语义 switch 序列；
 - A/B 严格交替；
 - `sp` 始终处于正确 stack range；
 - `s0-s11` sentinels 保持；
@@ -175,11 +221,12 @@ context_corruption
 时间分配：
 
 ```text
-概念预测                    10–15 分钟
-第一次 GDB 跟踪             20–25 分钟
-修复 save/restore           25–35 分钟
-验证栈与返回路径             15–20 分钟
-复习题                      10–15 分钟
+README：context 与控制流      10–15 分钟
+运行 reference 并预测            10 分钟
+GDB 观察 A→B→A              20–25 分钟
+实现三个 `_swtch` 逻辑块     25–30 分钟
+sentinel 与多轮验证              10 分钟
+复习与解释                    5–10 分钟
 ```
 
 # Lab 17：首次启动、Round-Robin 与生命周期
