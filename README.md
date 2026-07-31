@@ -10,6 +10,8 @@ The goal is not to memorize GDB commands in isolation. Each lab gives you a smal
 - Week 2: memory, stack, pointers, and core dumps.
 - Week 3: Makefiles, symbols, RISC-V 32 calling convention, and assembly view.
 - Week 4: QEMU and GDB remote debugging.
+- Week 5: privilege transitions, trap frames, PLIC, and UART interrupts.
+- Week 6: kernel threads, Round-Robin scheduling, conditions, locks, and interrupt critical sections.
 
 ## How to Start
 
@@ -62,6 +64,12 @@ To compile-check the completed Week 4 labs:
 
 ```bash
 bash scripts/verify-week4.sh
+```
+
+To build and run all Week 6 solution/exercise checks:
+
+```bash
+bash scripts/verify-week6.sh
 ```
 
 ## Why These CFLAGS?

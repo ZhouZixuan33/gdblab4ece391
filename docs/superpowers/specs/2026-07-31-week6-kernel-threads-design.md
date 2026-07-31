@@ -363,7 +363,7 @@ README 提供三张待填写的观察表：
 
 ### Condition wait/broadcast 必做观察
 
-框架提供一个正确、只读的 ECE391 condition 实现。教学路径复用 Week 5 的 UART external interrupt：worker 在 receive buffer 为空时等待 `rxbuf_not_empty`，UART ISR 收到字节后 broadcast。自动验收可通过同一 ISR-facing helper 注入确定性设备事件，避免测试依赖人工输入。
+框架提供一个正确、只读的 ECE391 condition 实现。必做路径使用确定性设备事件，经 ISR-facing helper 调用 `condition_broadcast()`，使学生集中观察 WAITING→READY，而不重复实现 Week 5 已验证的 UART→PLIC→trap 链。README 同时给出它与真实 UART 路径的逐步对应；教师演示可选择接入 Lab 15 UART ISR。
 
 ```text
 worker running in getchar
@@ -372,14 +372,14 @@ worker running in getchar
 → worker: RUNNING → WAITING
 → worker 进入 condition wait list，并离开 runnable 集合
 → scheduler 运行 main 或 idle
-→ UART interrupt receives a byte
-→ UART ISR calls condition_broadcast(rxbuf_not_empty)
+→ deterministic device event / UART ISR receives a byte
+→ ISR-facing helper calls condition_broadcast(rxbuf_not_empty)
 → worker: WAITING → READY
 → worker 加入 ready queue
 → scheduler 后续恢复 worker
 ```
 
-UART ISR 只调用 `condition_broadcast()`，不调用 `condition_wait()`；broadcast 本身不触发立即 yield。自动测试的事件注入必须走与 UART ISR 相同的 broadcast helper，不允许直接修改 worker state 或 ready queue。
+ISR-facing 事件发布只调用 `condition_broadcast()`，不调用 `condition_wait()`；broadcast 本身不触发立即 yield。确定性注入必须走与真实 UART ISR 相同的 broadcast helper，不允许直接修改 worker state 或 ready queue。
 
 学生填写：
 
@@ -697,7 +697,7 @@ condition_broadcast(cond):
   不主动 yield
 ```
 
-Lab 17 已要求通过 UART 路径观察和解释状态流。本 Challenge 进一步要求学生实现 ECE391 风格的 wait list、interrupt discipline 和状态转换，重点是避免“设备条件检查后、线程真正进入 wait list 前”发生 broadcast 所造成的 lost wakeup。预计额外 30–45 分钟。
+Lab 17 已要求通过 ISR-facing 设备事件观察和解释状态流，并在 README 中映射到真实 UART 路径。本 Challenge 进一步要求学生实现 ECE391 风格的 wait list、interrupt discipline 和状态转换，重点是避免“设备条件检查后、线程真正进入 wait list 前”发生 broadcast 所造成的 lost wakeup。预计额外 30–45 分钟。
 
 ## 20. 三实验能力闭环
 
