@@ -26,17 +26,17 @@ Condition variable 作为 Lab 18 Challenge，不属于必做路径。
 
 ## 2. 教学方法
 
-三个实验统一采用以下流程：
+三个实验都要求学生先建立运行模型，再接触代码。Lab 16 和 Lab 18 使用确定性故障帮助暴露 context corruption 与 race；Lab 17 使用可运行的正确基线，以流程观察为主，不人为制造调度错误。
 
 1. 学生先预测运行结果和状态变化；
-2. 运行包含确定性故障的 exercise；
+2. 运行 reference 或 exercise，获得可重复的基线现象；
 3. 在稳定 checkpoint 停下；
 4. 使用 GDB 检查寄存器、线程结构、栈和队列；
-5. 修改少量关键 TODO；
-6. 重新运行并解释修复的因果链；
+5. 在已理解流程后补全少量关键代码；
+6. 重新运行并解释代码补全或修复的因果链；
 7. 使用自动脚本验证多轮执行结果。
 
-故障必须可重复、可定位，不依赖偶然时序或不可解释的随机崩溃。
+使用故障的实验必须保证故障可重复、可定位，不依赖偶然时序或不可解释的随机崩溃。Lab 17 不以故障诊断作为学习目标。
 
 ## 3. 重要概念与掌握程度
 
@@ -199,19 +199,31 @@ context_corruption
 - 实现不返回的 `thread_exit()`；
 - 解释 idle thread 的作用。
 
-## 10. 学生 TODO 与框架边界
+## 10. 观察优先的任务与框架边界
 
-| TODO | 文件 | 任务 |
+Lab 17 先提供可直接运行的正确 reference。学生在修改代码前，完整观察一次：
+
+```text
+main spawn A/B/C
+→ A 第一次进入 thread_setup
+→ A yield 到 B
+→ B/C/main 依次运行
+→ C/B/A 先后 return
+→ thread_exit 将它们永久移出调度集合
+→ main 检查完成
+```
+
+观察完成后，exercise 只留下三个局部、语义明确的代码补全点：
+
+| TODO | 文件 | 学生任务 |
 |---|---|---|
-| 1 | `thread.c` | 分配空闲 `thrtab[]` entry |
-| 2 | `thread.c` | 设置 stack anchor 并完成 16-byte ABI 对齐 |
-| 3 | `thread.c` | 构造初始 `ra`、`sp` 和 trampoline 参数 |
-| 4 | `thread_setup.S` | 取入口函数和参数并调用 |
-| 5 | `thread.c` | 实现 `thread_yield()` 的 RR 队列与状态转换 |
-| 6 | `thread.c` | 实现 `thread_exit()` 并切换到下一个线程 |
-| 7 | `thread.c` | 阻止 EXITED 线程重新进入 ready queue |
+| 1 | `thread.c` | 根据刚观察的数据补全新线程的 `sp`、`ra`、入口函数、参数和 READY 状态 |
+| 2 | `thread.c` | 补全 `thread_yield()` 中“当前线程入队尾、下一线程出队首”的核心操作 |
+| 3 | `thread.c` | 补全 `thread_exit()` 的 EXITED 状态和永久切走操作 |
 
-框架提供 Lab 16 的正确 `_swtch()`、固定容量 thread table、stack storage、ready-list primitives、测试线程、main 和 idle 初始结构。
+这些 TODO 不通过隐蔽错误制造异常行为。未完成时程序停在带有明确说明的 `lab17_todo_checkpoint()`，避免学生先面对随机跳转、坏栈或损坏队列。
+
+框架提供 Lab 16 的正确 `_swtch()`、正确的只读 `thread_setup.S`、thread entry 分配、stack storage、ready-list primitives、参数搬运、测试线程、main 和 idle 初始结构。学生需要能解释 `thread_setup.S`，但本实验不再要求修改它。
 
 入口统一为：
 
@@ -253,14 +265,48 @@ running A, ready [B, C, D]
 
 若 ready list 为空，当前非退出线程继续运行；退出线程必须切到普通 READY 线程或 idle。idle 永不退出，只在没有普通 READY 线程时运行。
 
-## 12. 确定性故障
+## 12. README 概念与真实数据观察
 
-1. 新线程 `ra` 直接指向 worker，worker 返回后无合法 caller；
-2. stack top 未按 16 字节对齐，由 trampoline 入口显式检查；
-3. yield 把当前线程插入队首，产生 `A1 A2 A3 B1...` 而非 RR；
-4. EXITED 线程重新入队，scheduler 在 `scheduler_selected_nonready_thread` 停止。
+README 不以“寻找四个预埋 bug”为主线，而应包含以下内容：
 
-测试运行三个 worker，迭代次数分别为 3、2、1，并用结构化事件日志验证调度顺序。
+1. program、process、thread 的区别，以及线程共享/私有状态表；
+2. 已运行线程 context 与新线程 artificial context 的对照图；
+3. `thread_spawn → ready_list → _swtch → thread_setup → worker → thread_exit` 全路径；
+4. main、worker、idle 三类线程的差异；
+5. RR 队列在每次 yield 前后的状态表；
+6. `RUNNING/READY/EXITED` 状态转换图；
+7. stack 从高地址向低地址增长和 16-byte ABI 对齐；
+8. 为什么 worker 不能直接 return 到未知地址；
+9. 为什么 cooperative scheduler 依赖线程主动 yield；
+10. 学生在每个 GDB checkpoint 应记录什么、数据说明什么。
+
+测试运行三个 worker，迭代次数分别为 3、2、1，并输出结构化事件日志。学生先预测调度顺序，再把真实日志与预测对照。日志记录真实的 TID、`tp`、`sp`、`ra`、state、ready queue head/tail 和 switch count，而不是只打印 `A/B/C`。
+
+README 提供三张待填写的观察表：
+
+### 新线程首次运行
+
+| Checkpoint | TID | `tp` | `sp`/stack range | `ra` | state |
+|---|---:|---:|---|---|---|
+| created | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| first dispatch | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| setup entry | 学生填写 | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+
+### Round-Robin 队列
+
+| Running | yield 前 ready queue | 当前线程入队后 | selected next | yield 后 ready queue |
+|---|---|---|---|---|
+| main | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| A | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| B | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+
+### 线程退出
+
+| Worker | return 前 state | `thread_exit` 后 state | 是否仍在 ready queue | 后续是否再次运行 |
+|---|---|---|---|---|
+| C | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| B | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| A | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
 
 ## 13. GDB 证据与验收
 
@@ -274,7 +320,6 @@ scheduler_before_switch
 scheduler_after_select
 thread_function_returned
 thread_marked_exited
-scheduler_selected_nonready_thread
 ```
 
 学生验证：
@@ -288,6 +333,7 @@ scheduler_selected_nonready_thread
 自动验收：
 
 - 至少 20 次合计切换；
+- reference 与学生完成版产生相同的语义事件和状态转换序列；地址值只检查所属对象或 stack range，不要求数值完全相同；
 - RR 事件日志顺序正确；
 - 每个线程只使用自己的栈；
 - EXITED 线程不再调度；
@@ -297,12 +343,12 @@ scheduler_selected_nonready_thread
 时间分配：
 
 ```text
-预测首次启动路径             10–15 分钟
-检查初始 context             15–20 分钟
-修复 stack/trampoline        25–30 分钟
-实现 RR yield                25–30 分钟
-修复 exit                    15–20 分钟
-验收与复习题                 10–15 分钟
+README 概念与流程预测         15–20 分钟
+观察首次启动数据              15–20 分钟
+观察 RR 队列与状态转换        15–20 分钟
+补全三个核心代码点            20–25 分钟
+观察退出并完成验收            15–20 分钟
+复习题                         5–10 分钟
 ```
 
 # Lab 18：Race、Lock 与 Interrupt Critical Section
