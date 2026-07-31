@@ -22,7 +22,7 @@
 - deadlock detection；
 - nested interrupt。
 
-Condition variable 作为 Lab 18 Challenge，不属于必做路径。
+Condition wait/broadcast 的状态流观察属于 Lab 17 必做路径；condition variable 的完整代码实现作为 Lab 18 Challenge。
 
 ## 2. 教学方法
 
@@ -54,7 +54,7 @@ Condition variable 作为 Lab 18 Challenge，不属于必做路径。
 | Critical section | 围绕共享不变量定义 | 找出最小正确临界区 | lock-free algorithm |
 | Lock | 保证 thread-thread mutual exclusion | 修复 race 并验证 owner | 高性能多核锁 |
 | Interrupt masking | 保存旧状态、关闭、恢复，处理 thread-ISR 并发 | 编写 CSR helper | SMP interrupt coordination |
-| Condition variable | wait 移出 ready queue，broadcast 使其 READY | Challenge 中跟踪 wait/broadcast | 必做完整实现 |
+| Condition variable | wait 移出 runnable 集合，broadcast 使其 READY；wait 不可在 ISR 调用，broadcast 可在 ISR 调用 | Lab 17 跟踪 RUNNING→WAITING→READY→RUNNING | 完整实现为 Challenge |
 | Deadlock | 能识别持锁等待和锁顺序问题 | 识别简单故障 | 检测与恢复 |
 
 ## 4. ECE391 代码能力要求
@@ -244,7 +244,10 @@ sentinel 与多轮验证              10 分钟
 - 实现 FIFO Round-Robin；
 - 跟踪 RUNNING、READY、WAITING、EXITED；
 - 实现不返回的 `thread_exit()`；
-- 解释 idle thread 的作用。
+- 解释 idle thread 的作用；
+- 区分主动 `yield` 与阻塞 `condition_wait`；
+- 跟踪 wait/broadcast 引起的 WAITING→READY 状态变化；
+- 比较 cooperative 与 preemptive scheduling 的控制权和同步影响。
 
 ## 10. 观察优先的任务与框架边界
 
@@ -325,7 +328,10 @@ README 不以“寻找四个预埋 bug”为主线，而应包含以下内容：
 7. stack 从高地址向低地址增长和 16-byte ABI 对齐；
 8. 为什么 worker 不能直接 return 到未知地址；
 9. 为什么 cooperative scheduler 依赖线程主动 yield；
-10. 学生在每个 GDB checkpoint 应记录什么、数据说明什么。
+10. cooperative 与 preemptive scheduling 的差异，以及本实验为何不实现 timer preemption；
+11. `condition_wait()` 与普通 `thread_yield()` 的区别；
+12. 为什么 `condition_wait()` 不能从 ISR 调用，而 `condition_broadcast()` 可以；
+13. 学生在每个 GDB checkpoint 应记录什么、数据说明什么。
 
 测试运行三个 worker，迭代次数分别为 3、2、1，并输出结构化事件日志。学生先预测调度顺序，再把真实日志与预测对照。日志记录真实的 TID、`tp`、`sp`、`ra`、state、ready queue head/tail 和 switch count，而不是只打印 `A/B/C`。
 
@@ -355,6 +361,45 @@ README 提供三张待填写的观察表：
 | B | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
 | A | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
 
+### Condition wait/broadcast 必做观察
+
+框架提供一个正确、只读的 ECE391 condition 实现。教学路径复用 Week 5 的 UART external interrupt：worker 在 receive buffer 为空时等待 `rxbuf_not_empty`，UART ISR 收到字节后 broadcast。自动验收可通过同一 ISR-facing helper 注入确定性设备事件，避免测试依赖人工输入。
+
+```text
+worker running in getchar
+→ receive buffer empty
+→ condition_wait(rxbuf_not_empty)
+→ worker: RUNNING → WAITING
+→ worker 进入 condition wait list，并离开 runnable 集合
+→ scheduler 运行 main 或 idle
+→ UART interrupt receives a byte
+→ UART ISR calls condition_broadcast(rxbuf_not_empty)
+→ worker: WAITING → READY
+→ worker 加入 ready queue
+→ scheduler 后续恢复 worker
+```
+
+UART ISR 只调用 `condition_broadcast()`，不调用 `condition_wait()`；broadcast 本身不触发立即 yield。自动测试的事件注入必须走与 UART ISR 相同的 broadcast helper，不允许直接修改 worker state 或 ready queue。
+
+学生填写：
+
+| Checkpoint | running | worker state | ready queue | condition wait list |
+|---|---|---|---|---|
+| before wait | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| after sleep | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| after broadcast | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+| after resume | 学生填写 | 学生填写 | 学生填写 | 学生填写 |
+
+学生必须解释：
+
+- `thread_yield()` 后当前线程仍是 READY，`condition_wait()` 后当前线程是 WAITING；
+- WAITING 线程不能留在 ready queue；
+- broadcast 只把 waiter 变为 READY，不保证它立即运行；
+- `condition_wait()` 可能在 interrupts disabled 时进入；scheduler 在运行其他线程期间按约定处理 interrupt state，并在 wait 返回前恢复调用环境需要的状态；
+- condition 实现必须避免“条件已 broadcast，但线程尚未进入 wait list”的 lost wakeup 窗口。
+
+本段只要求观察和解释，不要求学生实现 condition 内部队列。完整实现仍属于 Challenge。
+
 ## 13. GDB 证据与验收
 
 稳定 checkpoints：
@@ -367,6 +412,10 @@ scheduler_before_switch
 scheduler_after_select
 thread_function_returned
 thread_marked_exited
+condition_wait_entered
+condition_thread_sleeping
+condition_broadcast_done
+condition_thread_resumed
 ```
 
 学生验证：
@@ -376,6 +425,9 @@ thread_marked_exited
 - 新线程创建后为 READY；
 - ready queue 始终遵循 FIFO；
 - 每个线程首次入口和 exit 各发生一次。
+- condition waiter 经历 RUNNING→WAITING→READY→RUNNING；
+- WAITING 期间 worker 不在 ready queue；
+- broadcast 后 worker 进入 ready queue，但不要求立即运行。
 
 自动验收：
 
@@ -384,17 +436,18 @@ thread_marked_exited
 - RR 事件日志顺序正确；
 - 每个线程只使用自己的栈；
 - EXITED 线程不再调度；
+- condition wait list 和 ready queue 中的成员关系正确；
 - main 和 idle 生命周期合法；
 - 输出 `LAB17 PASS`。
 
 时间分配：
 
 ```text
-README 概念与流程预测         15–20 分钟
-观察首次启动数据              15–20 分钟
-观察 RR 队列与状态转换        15–20 分钟
+README 概念与流程预测         10–15 分钟
+观察首次启动和 RR             20–25 分钟
+观察 condition 状态流         15–20 分钟
 补全三个核心代码点            20–25 分钟
-观察退出并完成验收            15–20 分钟
+观察退出并完成验收            10–15 分钟
 复习题                         5–10 分钟
 ```
 
@@ -514,6 +567,8 @@ volatile uint64_t event_checksum;
 event_checksum == checksum(event_count)
 ```
 
+`event_checksum` 只是让 thread-ISR interleaving 可观察的测试不变量，不是同步机制，也不是学生需要掌握的 ECE391 数据结构。真正的学习目标是识别成组共享状态，并保证 ISR 不能观察到中间状态。
+
 普通 thread lock 不能自动阻止 ISR。ISR 若获取一个被被中断线程持有的阻塞锁，会等待无法恢复的 owner，形成死锁。
 
 Part C 先运行未保护基线：
@@ -613,21 +668,36 @@ Part C 对照观察并补全 IRQ        20–25 分钟
 复习题                           5–10 分钟
 ```
 
-## 19. Condition Variable Challenge
+## 19. Condition Variable 实现 Challenge
 
-使用容量为 1 的 mailbox 进行 producer-consumer。学生补全：
+Challenge 使用与讲义一致的接口：
 
-```text
-condition_wait(cond, lock):
-  将 current 加入 cond wait list
-  current → WAITING
-  原子地释放 lock 并切换
-  被 broadcast 唤醒
-  重新 acquire lock
-  返回后由 while 重查条件
+```c
+void condition_init(struct condition *cond, const char *name);
+void condition_wait(struct condition *cond);
+void condition_broadcast(struct condition *cond);
 ```
 
-Challenge 的重点是解释为什么“先 release，再加入 wait list”会 lost wakeup。预计额外 30–45 分钟。
+学生补全：
+
+```text
+condition_wait(cond):
+  保存并关闭 interrupt，保护 wait list 与 scheduler state
+  将 current 加入 cond wait list
+  current → WAITING
+  调用 scheduler 切换到其他 runnable thread
+  scheduler 在运行其他线程期间按约定处理 interrupt enable
+  被 broadcast 唤醒
+  恢复调用 condition_wait 前所要求的 interrupt state
+  返回，由调用者的 while 重新检查设备条件
+
+condition_broadcast(cond):
+  将 wait list 中所有线程设为 READY
+  将它们加入 ready queue
+  不主动 yield
+```
+
+Lab 17 已要求通过 UART 路径观察和解释状态流。本 Challenge 进一步要求学生实现 ECE391 风格的 wait list、interrupt discipline 和状态转换，重点是避免“设备条件检查后、线程真正进入 wait list 前”发生 broadcast 所造成的 lost wakeup。预计额外 30–45 分钟。
 
 ## 20. 三实验能力闭环
 
